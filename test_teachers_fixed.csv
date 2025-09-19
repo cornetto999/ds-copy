@@ -1,5 +1,0 @@
-teacher_id,first_name,last_name,middle_name,email,department,position,status,zone,notes
-T001,John,Smith,Michael,john.smith@example.com,Computer Science,Faculty,Active,green,
-T002,Jane,Doe,Elizabeth,jane.doe@example.com,Mathematics,Faculty,Active,green,
-T003,Bob,Johnson,Robert,bob.johnson@example.com,Physics,Faculty,Active,green,
-

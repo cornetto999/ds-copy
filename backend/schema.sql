@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS teachers (
     enrolled_students INT DEFAULT 0,
     failed_students INT DEFAULT 0,
     failure_percentage DECIMAL(5,2) DEFAULT 0.00,
+    -- Performance tracking fields
+    p1_failed INT DEFAULT 0,
+    p1_percent DECIMAL(5,2) DEFAULT 0.00,
+    p1_category VARCHAR(50) DEFAULT 'GREEN (0.01%-10%)',
+    p2_failed INT DEFAULT 0,
+    p2_percent DECIMAL(5,2) DEFAULT 0.00,
+    p2_category VARCHAR(50) DEFAULT 'GREEN (0.01%-10%)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

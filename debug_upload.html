@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Upload</title>
+</head>
+<body>
+    <h1>Debug Teacher Upload</h1>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" id="fileInput" accept=".csv" required>
+        <input type="hidden" name="type" value="teachers">
+        <button type="submit">Upload</button>
+    </form>
+    
+    <div id="result"></div>
+    <div id="debug"></div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            console.log('File selected:', file);
+            console.log('File type:', file.type);
+            console.log('File size:', file.size);
+            
+            formData.append('file', file);
+            formData.append('type', 'teachers');
+            
+            // Debug FormData
+            console.log('FormData entries:');
+            for (let [key, value] of formData.entries()) {
+                console.log(key, value);
+            }
+            
+            document.getElementById('debug').innerHTML = 
+                '<h3>Debug Info:</h3>' +
+                '<p>File name: ' + file.name + '</p>' +
+                '<p>File type: ' + file.type + '</p>' +
+                '<p>File size: ' + file.size + '</p>';
+            
+            try {
+                console.log('Making request to: http://localhost/deliberation/routes/upload.php');
+                
+                const response = await fetch('http://localhost/deliberation/routes/upload.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                const result = await response.json();
+                console.log('Response data:', result);
+                
+                document.getElementById('result').innerHTML = 
+                    '<h3>Response (Status: ' + response.status + '):</h3><pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = 
+                    '<h3>Error:</h3><pre>' + error.message + '</pre>';
+            }
+        });
+    </script>
+</body>
+</html>

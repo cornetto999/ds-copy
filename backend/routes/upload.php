@@ -24,13 +24,43 @@ if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
 $file = $_FILES['file'];
 $uploadType = $_POST['type'] ?? 'students';
 
-// Validate file type - only CSV supported
-$allowedTypes = ['text/csv'];
+// Validate file type - support CSV and provide helpful error for Excel
+$allowedTypes = ['text/csv', 'text/plain', 'application/csv'];
 $fileType = $file['type'];
+$fileName = $file['name'];
+$fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
 
-if (!in_array($fileType, $allowedTypes)) {
+// Check if it's an Excel file
+$isExcelFile = in_array($fileExtension, ['xlsx', 'xls']) || 
+               in_array($fileType, ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel']);
+
+if ($isExcelFile) {
     http_response_code(400);
-    echo json_encode(['error' => 'Invalid file type. Please upload CSV files only. Excel files are not currently supported.']);
+    echo json_encode([
+        'error' => 'Excel files are not directly supported. Please convert your Excel file to CSV format:',
+        'instructions' => [
+            '1. Open your Excel file',
+            '2. Go to File > Save As',
+            '3. Choose "CSV (Comma delimited)" format',
+            '4. Save the file',
+            '5. Upload the CSV file instead'
+        ],
+        'supported_formats' => ['CSV (.csv)'],
+        'file_type_detected' => $fileExtension
+    ]);
+    exit;
+}
+
+// Check if it's a valid CSV file
+$isValidType = in_array($fileType, $allowedTypes) || $fileExtension === 'csv';
+
+if (!$isValidType) {
+    http_response_code(400);
+    echo json_encode([
+        'error' => 'Invalid file type. Please upload CSV files only.',
+        'supported_formats' => ['CSV (.csv)'],
+        'file_type_detected' => $fileExtension
+    ]);
     exit;
 }
 
@@ -131,22 +161,42 @@ function processData($data, $type, $conn) {
             $teacher = new TeacherModel($conn);
             foreach ($data as $row) {
                 try {
+                    // Handle both old format and new performance format
                     $teacherData = [
-                        'teacher_id' => $row['teacher_id'] ?? '',
-                        'first_name' => $row['first_name'] ?? '',
-                        'last_name' => $row['last_name'] ?? '',
-                        'middle_name' => $row['middle_name'] ?? null,
+                        'teacher_id' => $row['FacultyNo'] ?? $row['teacher_id'] ?? '',
+                        'first_name' => $row['FacultyName'] ?? $row['first_name'] ?? '',
+                        'last_name' => '', // Will be extracted from FacultyName
+                        'middle_name' => null,
                         'email' => $row['email'] ?? null,
                         'department' => $row['department'] ?? 'General',
                         'position' => $row['position'] ?? null,
                         'status' => $row['status'] ?? 'Active',
                         'zone' => $row['zone'] ?? 'green',
-                        'notes' => $row['notes'] ?? null
+                        'notes' => $row['notes'] ?? null,
+                        'enrolled_students' => (int)($row['EnrolledStudents'] ?? $row['enrolled_students'] ?? 0),
+                        'p1_failed' => (int)($row['P1_Failed'] ?? $row['p1_failed'] ?? 0),
+                        'p1_percent' => (float)($row['P1_Percent'] ?? $row['p1_percent'] ?? 0.00),
+                        'p1_category' => $row['P1_Category'] ?? $row['p1_category'] ?? 'GREEN (0.01%-10%)',
+                        'p2_failed' => (int)($row['P2_Failed'] ?? $row['p2_failed'] ?? 0),
+                        'p2_percent' => (float)($row['P2_Percent'] ?? $row['p2_percent'] ?? 0.00),
+                        'p2_category' => $row['P2_Category'] ?? $row['p2_category'] ?? 'GREEN (0.01%-10%)'
                     ];
                     
+                    // Extract first and last name from FacultyName if using new format
+                    if (isset($row['FacultyName']) && !empty($row['FacultyName'])) {
+                        $nameParts = explode(' ', trim($row['FacultyName']));
+                        if (count($nameParts) >= 2) {
+                            $teacherData['last_name'] = array_pop($nameParts); // Last part is last name
+                            $teacherData['first_name'] = implode(' ', $nameParts); // Everything else is first name
+                        } else {
+                            $teacherData['first_name'] = $row['FacultyName'];
+                            $teacherData['last_name'] = '';
+                        }
+                    }
+                    
                     // Validate required fields
-                    if (empty($teacherData['teacher_id']) || empty($teacherData['first_name']) || empty($teacherData['last_name'])) {
-                        throw new Exception('Missing required fields: teacher_id, first_name, or last_name');
+                    if (empty($teacherData['teacher_id']) || empty($teacherData['first_name'])) {
+                        throw new Exception('Missing required fields: FacultyNo/teacher_id and FacultyName/first_name');
                     }
                     
                     $teacher->create($teacherData);

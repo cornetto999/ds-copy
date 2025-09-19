@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +23,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Search, User, Edit, Eye, Loader2, Upload, Download } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Plus, Search, User, Edit, Eye, Loader2, Upload, Download, Settings, ArrowUpDown, ChevronLeft, ChevronRight, Filter } from "lucide-react";
 import ZoneBadge from "@/components/ZoneBadge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -41,6 +50,15 @@ interface Teacher {
   enrolled_students?: number;
   failed_students?: number;
   failure_percentage?: number;
+  p1_failed?: number;
+  p1_percent?: number;
+  p1_category?: string;
+  p2_failed?: number;
+  p2_percent?: number;
+  p2_category?: string;
+  p3_failed?: number;
+  p3_percent?: number;
+  p3_category?: string;
   created_at: string;
 }
 
@@ -56,6 +74,7 @@ const Teachers = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [academicYear, setAcademicYear] = useState("2024-2025");
   const [semester, setSemester] = useState("1st");
+  const [selectedPeriod, setSelectedPeriod] = useState("P1");
   const [formData, setFormData] = useState({
     teacher_id: "",
     first_name: "",
@@ -68,6 +87,30 @@ const Teachers = () => {
     zone: "green" as Teacher["zone"],
     notes: ""
   });
+  
+  // New flexible state
+  const [sortField, setSortField] = useState<keyof Teacher | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [visibleColumns, setVisibleColumns] = useState({
+    teacher_id: true,
+    name: true,
+    department: true,
+    enrolled: true,
+    p1_performance: true,
+    p2_performance: true,
+    p3_performance: true,
+    zone: true,
+    actions: true
+  });
+  const [filters, setFilters] = useState({
+    department: '',
+    zone: '',
+    status: ''
+  });
+  const [showFilters, setShowFilters] = useState(false);
+  
   const { toast } = useToast();
 
   // Generate academic years from 2023 to present
@@ -86,9 +129,22 @@ const Teachers = () => {
       setLoading(true);
       const response = await fetch('http://localhost/deliberation/routes/teachers.php');
       const data = await response.json();
-      setTeachers(data);
+      
+      // Ensure data is an array
+      if (Array.isArray(data)) {
+        setTeachers(data);
+      } else {
+        console.error('Invalid data format:', data);
+        setTeachers([]);
+        toast({
+          title: "Error",
+          description: "Invalid data format received from server",
+          variant: "destructive"
+        });
+      }
     } catch (error) {
       console.error('Error fetching teachers:', error);
+      setTeachers([]);
       toast({
         title: "Error",
         description: "Failed to load teachers data",
@@ -99,12 +155,67 @@ const Teachers = () => {
     }
   };
 
-  const filteredTeachers = teachers.filter(teacher => {
+  // Enhanced filtering and sorting logic
+  const filteredTeachers = (teachers || []).filter(teacher => {
     const fullName = `${teacher.first_name} ${teacher.last_name}`.toLowerCase();
-    return fullName.includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = fullName.includes(searchTerm.toLowerCase()) ||
            teacher.teacher_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
            teacher.department.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesDepartment = !filters.department || teacher.department === filters.department;
+    const matchesZone = !filters.zone || teacher.zone === filters.zone;
+    const matchesStatus = !filters.status || teacher.status === filters.status;
+    
+    return matchesSearch && matchesDepartment && matchesZone && matchesStatus;
   });
+
+  // Sorting logic
+  const sortedTeachers = [...filteredTeachers].sort((a, b) => {
+    if (!sortField) return 0;
+    
+    let aValue = a[sortField];
+    let bValue = b[sortField];
+    
+    // Handle special cases for sorting
+    if (sortField === 'first_name' || sortField === 'last_name') {
+      aValue = `${a.first_name} ${a.last_name}`.toLowerCase();
+      bValue = `${b.first_name} ${b.last_name}`.toLowerCase();
+    }
+    
+    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Pagination logic
+  const totalPages = Math.ceil(sortedTeachers.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedTeachers = sortedTeachers.slice(startIndex, startIndex + itemsPerPage);
+
+  // Get unique values for filters
+  const departments = [...new Set(teachers.map(t => t.department))];
+  const zones = [...new Set(teachers.map(t => t.zone))];
+  const statuses = [...new Set(teachers.map(t => t.status))];
+
+  const handleSort = (field: keyof Teacher) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (value: string) => {
+    setItemsPerPage(Number(value));
+    setCurrentPage(1);
+  };
+
+  // P1, P2, and P3 are always available
 
   if (loading) {
     return (
@@ -246,11 +357,36 @@ const Teachers = () => {
 
     // Validate file type - only CSV supported
     const allowedTypes = ['text/csv'];
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
-    if (!allowedTypes.includes(file.type)) {
+    if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+      toast({
+        title: "Excel file not supported",
+        description: (
+          <div className="space-y-2">
+            <p>Excel files (.xlsx, .xls) are not directly supported.</p>
+            <div className="text-sm">
+              <p className="font-medium">Please convert to CSV:</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs">
+                <li>Open your Excel file</li>
+                <li>Go to File → Save As</li>
+                <li>Choose "CSV (Comma delimited)" format</li>
+                <li>Save the file</li>
+                <li>Upload the CSV file instead</li>
+              </ol>
+            </div>
+          </div>
+        ),
+        variant: "destructive",
+        duration: 10000
+      });
+      return;
+    }
+
+    if (!allowedTypes.includes(file.type) && fileExtension !== 'csv') {
       toast({
         title: "Invalid file type",
-        description: "Please upload CSV files only. Excel files (.xlsx, .xls) are not currently supported.",
+        description: "Please upload CSV files only.",
         variant: "destructive"
       });
       return;
@@ -293,11 +429,30 @@ const Teachers = () => {
         // Refresh the teachers list
         fetchTeachers();
       } else {
-        toast({
-          title: "Upload failed",
-          description: result.error || "Failed to upload file",
-          variant: "destructive"
-        });
+        // Handle Excel file error with instructions
+        if (result.instructions) {
+          const instructionText = result.instructions.join('\n');
+          toast({
+            title: "Excel file not supported",
+            description: (
+              <div className="space-y-2">
+                <p>{result.error}</p>
+                <div className="text-sm">
+                  <p className="font-medium">Instructions:</p>
+                  <pre className="whitespace-pre-wrap text-xs">{instructionText}</pre>
+                </div>
+              </div>
+            ),
+            variant: "destructive",
+            duration: 10000
+          });
+        } else {
+          toast({
+            title: "Upload failed",
+            description: result.error || "Failed to upload file",
+            variant: "destructive"
+          });
+        }
       }
     } catch (error) {
       toast({
@@ -312,16 +467,24 @@ const Teachers = () => {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "teacher_id,first_name,last_name,middle_name,email,department,position,status,zone,notes\n" +
-      "T001,John,Smith,Michael,john.smith@example.com,Computer Science,Faculty,Active,green,\n" +
-      "T002,Jane,Doe,Elizabeth,jane.doe@example.com,Mathematics,Faculty,Active,green,\n" +
-      "T003,Bob,Johnson,Robert,bob.johnson@example.com,Physics,Faculty,Active,green,";
+    let csvContent = "FacultyNo,FacultyName,EnrolledStudents,P1_Failed,P1_Percent,P1_Category,P2_Failed,P2_Percent,P2_Category";
+    let sampleData = "14-007-F,ADORMIE CORRALES MACARIO,184,18,9.78,GREEN (0.01%-10%),,,\n" +
+      "24-219-F,ALEXIS VIADOR LAROSA,307,9,2.93,GREEN (0.01%-10%),,,\n" +
+      "24-077-F,AMBER ANN ACAYLAR,201,16,7.96,GREEN (0.01%-10%),,,";
+    
+    // Add P3 only for 2nd semester
+    if (semester === "2nd") {
+      csvContent += ",P3_Failed,P3_Percent,P3_Category";
+      sampleData = sampleData.replace(/,,,/g, ",,,");
+    }
+    
+    csvContent += "\n" + sampleData;
     
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'teachers_template.csv';
+    a.download = `teachers_performance_template_${semester}_semester.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -378,6 +541,10 @@ const Teachers = () => {
             </SelectContent>
           </Select>
         </div>
+        
+        {/* Vertical separator line */}
+        <div className="h-6 w-px bg-border"></div>
+        
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Semester:</span>
           <Select value={semester} onValueChange={setSemester}>
@@ -390,25 +557,128 @@ const Teachers = () => {
             </SelectContent>
           </Select>
         </div>
+        
+        {/* Period selector dropdown */}
+        <div className="flex items-center gap-2 ml-2">
+          <span className="text-sm text-muted-foreground">Period:</span>
+          <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+            <SelectTrigger className="w-20 h-8 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="P1">P1</SelectItem>
+              <SelectItem value="P2">P2</SelectItem>
+              <SelectItem value="P3">P3</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Search and Filters */}
       <Card>
         <CardHeader>
-          <CardTitle>Search & Filter</CardTitle>
-          <CardDescription>
-            Find teachers by name, ID, or department
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Search & Filter</CardTitle>
+              <CardDescription>
+                Find teachers by name, ID, or department
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowFilters(!showFilters)}
+              >
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Columns
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {Object.entries(visibleColumns).map(([key, visible]) => (
+                    <DropdownMenuCheckboxItem
+                      key={key}
+                      checked={visible}
+                      onCheckedChange={(checked) =>
+                        setVisibleColumns(prev => ({ ...prev, [key]: checked }))
+                      }
+                    >
+                      {key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center space-x-2">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search teachers..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
-            />
+          <div className="space-y-4">
+            <div className="flex items-center space-x-2">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search teachers..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="max-w-sm"
+              />
+            </div>
+            
+            {showFilters && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t">
+                <div>
+                  <Label htmlFor="department-filter">Department</Label>
+                  <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All departments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All departments</SelectItem>
+                      {departments.map(dept => (
+                        <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="zone-filter">Zone</Label>
+                  <Select value={filters.zone} onValueChange={(value) => setFilters(prev => ({ ...prev, zone: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All zones" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All zones</SelectItem>
+                      {zones.map(zone => (
+                        <SelectItem key={zone} value={zone}>
+                          {zone.charAt(0).toUpperCase() + zone.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="status-filter">Status</Label>
+                  <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All statuses</SelectItem>
+                      {statuses.map(status => (
+                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -416,78 +686,258 @@ const Teachers = () => {
       {/* Teachers Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Faculty List</CardTitle>
-          <CardDescription>
-            {filteredTeachers.length} teachers found
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Faculty List</CardTitle>
+              <CardDescription>
+                {sortedTeachers.length} teachers found
+                {sortedTeachers.length !== teachers.length && ` (filtered from ${teachers.length} total)`}
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="items-per-page" className="text-sm">Show:</Label>
+              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+                <SelectTrigger className="w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5</SelectItem>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Teacher ID</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Students</TableHead>
-                <TableHead>Failure Rate</TableHead>
-                <TableHead>Performance Zone</TableHead>
-                <TableHead>Notes</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredTeachers.map((teacher) => (
-                <TableRow key={teacher.id}>
-                  <TableCell className="font-medium">
-                    {teacher.teacher_id}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-muted-foreground" />
-                      {`${teacher.first_name} ${teacher.last_name}`}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {teacher.department}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm">
-                      <div>Enrolled: {teacher.enrolled_students || 0}</div>
-                      <div className="text-muted-foreground">Failed: {teacher.failed_students || 0}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={teacher.failure_percentage && teacher.failure_percentage > 40 ? "destructive" : 
-                                   teacher.failure_percentage && teacher.failure_percentage > 10 ? "secondary" : "default"}>
-                      {teacher.failure_percentage ? `${teacher.failure_percentage.toFixed(1)}%` : 'N/A'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <ZoneBadge zone={teacher.zone} />
-                  </TableCell>
-                  <TableCell className="max-w-xs">
-                    <div className="text-sm text-muted-foreground truncate">
-                      {teacher.notes || "No notes"}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => handleEdit(teacher)}>
-                        <Edit className="h-4 w-4 mr-1" />
-                        Edit
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleView(teacher)}>
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {visibleColumns.teacher_id && (
+                    <TableHead 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort('teacher_id')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Teacher ID
+                        <ArrowUpDown className="h-4 w-4" />
+                      </div>
+                    </TableHead>
+                  )}
+                  {visibleColumns.name && (
+                    <TableHead 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort('first_name')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Name
+                        <ArrowUpDown className="h-4 w-4" />
+                      </div>
+                    </TableHead>
+                  )}
+                  {visibleColumns.department && (
+                    <TableHead 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort('department')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Department
+                        <ArrowUpDown className="h-4 w-4" />
+                      </div>
+                    </TableHead>
+                  )}
+                  {visibleColumns.enrolled && (
+                    <TableHead 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort('enrolled_students')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Enrolled
+                        <ArrowUpDown className="h-4 w-4" />
+                      </div>
+                    </TableHead>
+                  )}
+                  {visibleColumns.p1_performance && (
+                    <TableHead>P1 Performance</TableHead>
+                  )}
+                  {visibleColumns.p2_performance && (
+                    <TableHead>P2 Performance</TableHead>
+                  )}
+                  {visibleColumns.p3_performance && (
+                    <TableHead>P3 Performance</TableHead>
+                  )}
+                  {visibleColumns.zone && (
+                    <TableHead 
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort('zone')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Zone
+                        <ArrowUpDown className="h-4 w-4" />
+                      </div>
+                    </TableHead>
+                  )}
+                  {visibleColumns.actions && (
+                    <TableHead>Actions</TableHead>
+                  )}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {paginatedTeachers.map((teacher) => (
+                  <TableRow key={teacher.id}>
+                    {visibleColumns.teacher_id && (
+                      <TableCell className="font-medium">
+                        {teacher.teacher_id}
+                      </TableCell>
+                    )}
+                    {visibleColumns.name && (
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="truncate max-w-[200px]">
+                            {`${teacher.first_name} ${teacher.last_name}`}
+                          </span>
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumns.department && (
+                      <TableCell>
+                        <Badge variant="outline" className="truncate max-w-[150px]">
+                          {teacher.department}
+                        </Badge>
+                      </TableCell>
+                    )}
+                    {visibleColumns.enrolled && (
+                      <TableCell>
+                        <div className="text-sm font-medium">
+                          {teacher.enrolled_students || 0}
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumns.p1_performance && (
+                      <TableCell>
+                        <div className="text-sm">
+                          <div>Failed: {teacher.p1_failed || 0}</div>
+                          <div className="text-muted-foreground">
+                            {teacher.p1_percent && !isNaN(Number(teacher.p1_percent)) ? `${Number(teacher.p1_percent).toFixed(1)}%` : 'N/A'}
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {teacher.p1_category || 'N/A'}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumns.p2_performance && (
+                      <TableCell>
+                        <div className="text-sm">
+                          <div>Failed: {teacher.p2_failed || 0}</div>
+                          <div className="text-muted-foreground">
+                            {teacher.p2_percent && !isNaN(Number(teacher.p2_percent)) ? `${Number(teacher.p2_percent).toFixed(1)}%` : 'N/A'}
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {teacher.p2_category || 'N/A'}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumns.p3_performance && (
+                      <TableCell>
+                        <div className="text-sm">
+                          <div>Failed: {teacher.p3_failed || 0}</div>
+                          <div className="text-muted-foreground">
+                            {teacher.p3_percent && !isNaN(Number(teacher.p3_percent)) ? `${Number(teacher.p3_percent).toFixed(1)}%` : 'N/A'}
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {teacher.p3_category || 'N/A'}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                    )}
+                    {visibleColumns.zone && (
+                      <TableCell>
+                        <ZoneBadge zone={teacher.zone} />
+                      </TableCell>
+                    )}
+                    {visibleColumns.actions && (
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(teacher)}>
+                            <Edit className="h-4 w-4 mr-1" />
+                            <span className="hidden sm:inline">Edit</span>
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleView(teacher)}>
+                            <Eye className="h-4 w-4 mr-1" />
+                            <span className="hidden sm:inline">View</span>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-sm text-muted-foreground">
+                Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, sortedTeachers.length)} of {sortedTeachers.length} teachers
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const page = i + 1;
+                    return (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(page)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {page}
+                      </Button>
+                    );
+                  })}
+                  {totalPages > 5 && (
+                    <>
+                      <span className="text-muted-foreground">...</span>
+                      <Button
+                        variant={currentPage === totalPages ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handlePageChange(totalPages)}
+                        className="w-8 h-8 p-0"
+                      >
+                        {totalPages}
+                      </Button>
+                    </>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -496,7 +946,7 @@ const Teachers = () => {
         <Card>
           <CardContent className="p-6">
             <div className="text-2xl font-bold">
-              {new Set(teachers.map(t => t.department)).size}
+              {new Set((teachers || []).map(t => t.department)).size}
             </div>
             <p className="text-xs text-muted-foreground">Departments</p>
           </CardContent>
@@ -505,7 +955,7 @@ const Teachers = () => {
         <Card>
           <CardContent className="p-6">
             <div className="text-2xl font-bold">
-              {teachers.filter(t => t.zone === "green").length}
+              {(teachers || []).filter(t => t.zone === "green").length}
             </div>
             <p className="text-xs text-muted-foreground">High performers</p>
           </CardContent>
@@ -514,7 +964,7 @@ const Teachers = () => {
         <Card>
           <CardContent className="p-6">
             <div className="text-2xl font-bold">
-              {teachers.filter(t => t.zone === "red").length}
+              {(teachers || []).filter(t => t.zone === "red").length}
             </div>
             <p className="text-xs text-muted-foreground">Need support</p>
           </CardContent>

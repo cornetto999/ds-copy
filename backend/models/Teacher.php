@@ -13,14 +13,8 @@ class TeacherModel {
 
     public function all(): array {
         $stmt = $this->pdo->query('
-            SELECT t.*, 
-                   COUNT(s.id) as enrolled_students,
-                   COUNT(CASE WHEN s.zone = "red" THEN 1 END) as failed_students,
-                   ROUND(COUNT(CASE WHEN s.zone = "red" THEN 1 END) * 100.0 / NULLIF(COUNT(s.id), 0), 2) as failure_percentage
+            SELECT t.*
             FROM teachers t 
-            LEFT JOIN subjects sub ON t.id = sub.teacher_id
-            LEFT JOIN students s ON sub.id = s.subject_id
-            GROUP BY t.id 
             ORDER BY t.created_at DESC
         ');
         return $stmt->fetchAll();
@@ -28,15 +22,9 @@ class TeacherModel {
 
     public function find(int $id): ?array {
         $stmt = $this->pdo->prepare('
-            SELECT t.*, 
-                   COUNT(s.id) as enrolled_students,
-                   COUNT(CASE WHEN s.zone = "red" THEN 1 END) as failed_students,
-                   ROUND(COUNT(CASE WHEN s.zone = "red" THEN 1 END) * 100.0 / NULLIF(COUNT(s.id), 0), 2) as failure_percentage
+            SELECT t.*
             FROM teachers t 
-            LEFT JOIN subjects sub ON t.id = sub.teacher_id
-            LEFT JOIN students s ON sub.id = s.subject_id
             WHERE t.id = ?
-            GROUP BY t.id
         ');
         $stmt->execute([$id]);
         $row = $stmt->fetch();
@@ -46,8 +34,27 @@ class TeacherModel {
     public function create(array $data): int {
         $stmt = $this->pdo->prepare('
             INSERT INTO teachers (teacher_id, first_name, last_name, middle_name, email, 
-                                department, position, status, zone, notes) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                department, position, status, zone, notes, enrolled_students,
+                                p1_failed, p1_percent, p1_category, p2_failed, p2_percent, p2_category) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                first_name = VALUES(first_name),
+                last_name = VALUES(last_name),
+                middle_name = VALUES(middle_name),
+                email = VALUES(email),
+                department = VALUES(department),
+                position = VALUES(position),
+                status = VALUES(status),
+                zone = VALUES(zone),
+                notes = VALUES(notes),
+                enrolled_students = VALUES(enrolled_students),
+                p1_failed = VALUES(p1_failed),
+                p1_percent = VALUES(p1_percent),
+                p1_category = VALUES(p1_category),
+                p2_failed = VALUES(p2_failed),
+                p2_percent = VALUES(p2_percent),
+                p2_category = VALUES(p2_category),
+                updated_at = CURRENT_TIMESTAMP
         ');
         $stmt->execute([
             $data['teacher_id'] ?? '',
@@ -60,6 +67,13 @@ class TeacherModel {
             $data['status'] ?? 'Active',
             $data['zone'] ?? 'green',
             $data['notes'] ?? null,
+            $data['enrolled_students'] ?? 0,
+            $data['p1_failed'] ?? 0,
+            $data['p1_percent'] ?? 0.00,
+            $data['p1_category'] ?? 'GREEN (0.01%-10%)',
+            $data['p2_failed'] ?? 0,
+            $data['p2_percent'] ?? 0.00,
+            $data['p2_category'] ?? 'GREEN (0.01%-10%)',
         ]);
         return intval($this->pdo->lastInsertId());
     }
@@ -107,6 +121,34 @@ class TeacherModel {
         if (isset($data['notes'])) {
             $fields[] = 'notes = ?';
             $values[] = $data['notes'];
+        }
+        if (isset($data['enrolled_students'])) {
+            $fields[] = 'enrolled_students = ?';
+            $values[] = $data['enrolled_students'];
+        }
+        if (isset($data['p1_failed'])) {
+            $fields[] = 'p1_failed = ?';
+            $values[] = $data['p1_failed'];
+        }
+        if (isset($data['p1_percent'])) {
+            $fields[] = 'p1_percent = ?';
+            $values[] = $data['p1_percent'];
+        }
+        if (isset($data['p1_category'])) {
+            $fields[] = 'p1_category = ?';
+            $values[] = $data['p1_category'];
+        }
+        if (isset($data['p2_failed'])) {
+            $fields[] = 'p2_failed = ?';
+            $values[] = $data['p2_failed'];
+        }
+        if (isset($data['p2_percent'])) {
+            $fields[] = 'p2_percent = ?';
+            $values[] = $data['p2_percent'];
+        }
+        if (isset($data['p2_category'])) {
+            $fields[] = 'p2_category = ?';
+            $values[] = $data['p2_category'];
         }
         
         if (empty($fields)) {
