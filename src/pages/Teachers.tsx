@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+// Removed unused Checkbox import
 import {
   Dialog,
   DialogContent,
@@ -23,34 +23,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Plus, Search, User, Edit, Eye, Loader2, Upload, Download, Settings, ArrowUpDown, ChevronLeft, ChevronRight, Filter, BarChart3, TrendingUp, PieChart } from "lucide-react";
+// Removed unused DropdownMenu imports
+import { Plus, Search, User, Edit, Eye, Loader2, Upload, Download, BarChart3, ChevronLeft, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import ZoneBadge from "@/components/ZoneBadge";
+import CategoryBadge from "@/components/CategoryBadge";
 import { useToast } from "@/hooks/use-toast";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart as RechartsPieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-  Area,
-  AreaChart
-} from "recharts";
+import { apiUrl } from "@/lib/api";
 
 interface Teacher {
   id: number;
@@ -66,15 +45,15 @@ interface Teacher {
   notes?: string;
   enrolled_students?: number;
   failed_students?: number;
-  failure_percentage?: number | string;
+  failure_percentage?: number;
   p1_failed?: number;
-  p1_percent?: number | string;
+  p1_percent?: number;
   p1_category?: string;
   p2_failed?: number;
-  p2_percent?: number | string;
+  p2_percent?: number;
   p2_category?: string;
   p3_failed?: number;
-  p3_percent?: number | string;
+  p3_percent?: number;
   p3_category?: string;
   created_at: string;
 }
@@ -91,7 +70,7 @@ const Teachers = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [academicYear, setAcademicYear] = useState("2024-2025");
   const [semester, setSemester] = useState("1st");
-  const [selectedPeriod, setSelectedPeriod] = useState("P1");
+  const [selectedPeriod, setSelectedPeriod] = useState("All");
   const [formData, setFormData] = useState({
     teacher_id: "",
     first_name: "",
@@ -105,9 +84,7 @@ const Teachers = () => {
     notes: ""
   });
   
-  // New flexible state
-  const [sortField, setSortField] = useState<keyof Teacher | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [visibleColumns, setVisibleColumns] = useState({
@@ -127,152 +104,8 @@ const Teachers = () => {
     status: ''
   });
   const [showFilters, setShowFilters] = useState(false);
-  const [showReports, setShowReports] = useState(false);
-  const [reportFilters, setReportFilters] = useState({
-    department: '',
-    performanceRange: 'all',
-    chartType: 'bar'
-  });
   
   const { toast } = useToast();
-
-  // Filter teachers based on report filters
-  const getFilteredTeachers = () => {
-    return teachers.filter(teacher => {
-      // Department filter
-      if (reportFilters.department && teacher.department !== reportFilters.department) {
-        return false;
-      }
-      
-      // Performance range filter
-      if (reportFilters.performanceRange !== 'all') {
-        const avgPercent = ((Number(teacher.p1_percent) || 0) + (Number(teacher.p2_percent) || 0) + (Number(teacher.p3_percent) || 0)) / 3;
-        switch (reportFilters.performanceRange) {
-          case 'green':
-            return avgPercent <= 10;
-          case 'yellow':
-            return avgPercent > 10 && avgPercent <= 40;
-          case 'red':
-            return avgPercent > 40;
-          default:
-            return true;
-        }
-      }
-      
-      return true;
-    });
-  };
-
-  // Chart data generation functions
-  const getZoneDistributionData = () => {
-    const filteredTeachers = getFilteredTeachers();
-    const zones = filteredTeachers.reduce((acc, teacher) => {
-      acc[teacher.zone] = (acc[teacher.zone] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return Object.entries(zones).map(([zone, count]) => ({
-      zone: zone.charAt(0).toUpperCase() + zone.slice(1),
-      count,
-      percentage: Math.round((count / filteredTeachers.length) * 100)
-    }));
-  };
-
-  const getDepartmentPerformanceData = () => {
-    const filteredTeachers = getFilteredTeachers();
-    const departments = filteredTeachers.reduce((acc, teacher) => {
-      if (!acc[teacher.department]) {
-        acc[teacher.department] = {
-          total: 0,
-          green: 0,
-          yellow: 0,
-          red: 0,
-          avgP1Percent: 0,
-          avgP2Percent: 0,
-          avgP3Percent: 0
-        };
-      }
-      acc[teacher.department].total++;
-      acc[teacher.department][teacher.zone]++;
-      
-      const p1Percent = Number(teacher.p1_percent) || 0;
-      const p2Percent = Number(teacher.p2_percent) || 0;
-      const p3Percent = Number(teacher.p3_percent) || 0;
-      
-      acc[teacher.department].avgP1Percent += p1Percent;
-      acc[teacher.department].avgP2Percent += p2Percent;
-      acc[teacher.department].avgP3Percent += p3Percent;
-      
-      return acc;
-    }, {} as Record<string, any>);
-
-    return Object.entries(departments).map(([department, data]) => ({
-      department: department.length > 15 ? department.substring(0, 15) + '...' : department,
-      total: data.total,
-      green: data.green,
-      yellow: data.yellow,
-      red: data.red,
-      avgP1Percent: Math.round((data.avgP1Percent / data.total) * 10) / 10,
-      avgP2Percent: Math.round((data.avgP2Percent / data.total) * 10) / 10,
-      avgP3Percent: Math.round((data.avgP3Percent / data.total) * 10) / 10
-    }));
-  };
-
-  const getPerformanceTrendData = () => {
-    return getFilteredTeachers().map(teacher => ({
-      name: `${teacher.first_name.split(' ')[0]} ${teacher.last_name}`.substring(0, 15),
-      p1: Number(teacher.p1_percent) || 0,
-      p2: Number(teacher.p2_percent) || 0,
-      p3: Number(teacher.p3_percent) || 0,
-      zone: teacher.zone
-    }));
-  };
-
-  const getTopPerformersData = () => {
-    return getFilteredTeachers()
-      .map(teacher => ({
-        name: `${teacher.first_name} ${teacher.last_name}`.substring(0, 20),
-        p1Percent: Number(teacher.p1_percent) || 0,
-        p2Percent: Number(teacher.p2_percent) || 0,
-        p3Percent: Number(teacher.p3_percent) || 0,
-        avgPercent: ((Number(teacher.p1_percent) || 0) + (Number(teacher.p2_percent) || 0) + (Number(teacher.p3_percent) || 0)) / 3,
-        zone: teacher.zone
-      }))
-      .sort((a, b) => a.avgPercent - b.avgPercent)
-      .slice(0, 10);
-  };
-
-  const exportReportsData = () => {
-    const reportsData = {
-      zoneDistribution: getZoneDistributionData(),
-      departmentPerformance: getDepartmentPerformanceData(),
-      performanceTrends: getPerformanceTrendData(),
-      topPerformers: getTopPerformersData(),
-      summary: {
-        totalTeachers: teachers.length,
-        greenZone: teachers.filter(t => t.zone === 'green').length,
-        yellowZone: teachers.filter(t => t.zone === 'yellow').length,
-        redZone: teachers.filter(t => t.zone === 'red').length,
-        generatedAt: new Date().toISOString()
-      }
-    };
-
-    const dataStr = JSON.stringify(reportsData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `teacher-reports-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast({
-      title: "Reports Exported",
-      description: "Teacher performance reports have been downloaded successfully.",
-    });
-  };
 
   // Generate academic years from 2023 to present
   const currentYear = new Date().getFullYear();
@@ -281,14 +114,60 @@ const Teachers = () => {
     academicYears.push(`${year}-${year + 1}`);
   }
 
+  const navigate = useNavigate();
+
   useEffect(() => {
     fetchTeachers();
   }, []);
 
+  useEffect(() => {
+    setVisibleColumns(prev => ({
+      ...prev,
+      p1_performance: selectedPeriod === 'All' || selectedPeriod === 'P1',
+      p2_performance: selectedPeriod === 'All' || selectedPeriod === 'P2',
+      p3_performance: selectedPeriod === 'All' || selectedPeriod === 'P3',
+    }));
+  }, [selectedPeriod]);
+
+  const calcPercent = (failed?: number | string, enrolled?: number | string) => {
+    const f = Number(failed);
+    const e = Number(enrolled);
+    if (!isFinite(f) || !isFinite(e) || e <= 0) return null;
+    return (f / e) * 100;
+  };
+
+  const categorizeFromPercent = (failed?: number | string, enrolled?: number | string) => {
+    const pct = calcPercent(failed, enrolled);
+    if (pct === null) return null;
+    if (pct === 0) return 'GREEN (0%)';
+    if (pct <= 10) return 'GREEN (0.01%-10%)';
+    if (pct <= 40) return 'YELLOW (10.01%-40%)';
+    return 'RED (40.01%-100%)';
+  };
+
+  const percentFromData = (
+    dbPercent?: number | string,
+    failed?: number | string,
+    enrolled?: number | string
+  ) => {
+    const direct = Number(dbPercent);
+    const calc = calcPercent(failed, enrolled);
+    if (calc !== null) return calc;
+    if (isFinite(direct)) return direct;
+    return null;
+  };
+
+  const categoryFromPercentValue = (pct: number) => {
+    if (pct === 0) return 'GREEN (0%)';
+    if (pct <= 10) return 'GREEN (0.01%-10%)';
+    if (pct <= 40) return 'YELLOW (10.01%-40%)';
+    return 'RED (40.01%-100%)';
+  };
+
   const fetchTeachers = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost/deliberation/routes/teachers.php');
+      const response = await fetch(apiUrl('teachers.php'));
       const data = await response.json();
       
       // Ensure data is an array
@@ -326,96 +205,48 @@ const Teachers = () => {
     const matchesDepartment = !filters.department || teacher.department === filters.department;
     const matchesZone = !filters.zone || teacher.zone === filters.zone;
     const matchesStatus = !filters.status || teacher.status === filters.status;
+
+    const periodMatches = selectedPeriod === 'All' ? true : (() => {
+      const base = selectedPeriod.toLowerCase();
+      const failedVal = (teacher as any)[`${base}_failed`];
+      const percentVal = (teacher as any)[`${base}_percent`];
+      const categoryVal = (teacher as any)[`${base}_category`];
+      return (failedVal !== undefined && failedVal !== null) ||
+             (percentVal !== undefined && percentVal !== null) ||
+             (typeof categoryVal === 'string' && categoryVal.trim() !== '');
+    })();
     
-    return matchesSearch && matchesDepartment && matchesZone && matchesStatus;
+    return matchesSearch && matchesDepartment && matchesZone && matchesStatus && periodMatches;
   });
 
-  // Sorting logic
-  const sortedTeachers = [...filteredTeachers].sort((a, b) => {
-    if (!sortField) return 0;
-    
-    let aValue = a[sortField];
-    let bValue = b[sortField];
-    
-    // Handle special cases for sorting
-    if (sortField === 'first_name' || sortField === 'last_name') {
-      aValue = `${a.first_name} ${a.last_name}`.toLowerCase();
-      bValue = `${b.first_name} ${b.last_name}`.toLowerCase();
-    }
-    
-    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
+  // No interactive sorting on Teachers table; keep filtered order
+  const sortedTeachers = filteredTeachers;
 
-  // Pagination logic
-  const totalPages = Math.ceil(sortedTeachers.length / itemsPerPage);
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(sortedTeachers.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedTeachers = sortedTeachers.slice(startIndex, startIndex + itemsPerPage);
+
+  // Handlers for pagination
+  const handlePageChange = (page: number) => {
+    const clamped = Math.min(Math.max(page, 1), totalPages);
+    setCurrentPage(clamped);
+  };
+
+  const handleItemsPerPageChange = (value: string) => {
+    const next = Number(value) || 10;
+    setItemsPerPage(next);
+    setCurrentPage(1);
+  };
 
   // Get unique values for filters
   const departments = [...new Set(teachers.map(t => t.department))];
   const zones = [...new Set(teachers.map(t => t.zone))];
   const statuses = [...new Set(teachers.map(t => t.status))];
 
-  const handleSort = (field: keyof Teacher) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-  };
-
-  const handlePageChange = (page: number) => {
-    setCurrentPage(page);
-  };
-
-  const handleItemsPerPageChange = (value: string) => {
-    setItemsPerPage(Number(value));
-    setCurrentPage(1);
-  };
+  // Removed obsolete sort and pagination handlers
 
   // P1, P2, and P3 are always available
-
-  // Helper to render a compact, color-coded performance cell for P1/P2/P3
-  const renderPerformance = (teacher: Teacher, period: 'p1' | 'p2' | 'p3') => {
-    const failed = (teacher as any)[`${period}_failed`] as number | undefined;
-    const percent = (teacher as any)[`${period}_percent`] as number | undefined;
-    const category = (teacher as any)[`${period}_category`] as string | undefined;
-
-    const isNA = !failed || failed === 0;
-    const badgeClassName = isNA
-      ? 'bg-blue-500 hover:bg-blue-600 text-white'
-      : category?.includes('RED')
-      ? 'bg-red-500 hover:bg-red-600 text-white'
-      : category?.includes('YELLOW')
-      ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-      : 'bg-green-500 hover:bg-green-600 text-white';
-
-    const percentText = percent && !isNaN(Number(percent)) ? `${Number(percent).toFixed(1)}%` : 'N/A';
-    const badgeLabel = isNA ? 'N/A' : category || 'N/A';
-
-    return (
-      <div className="space-y-1">
-        <div className="text-sm">Failed: {failed || 0}</div>
-        <div className="text-xs text-muted-foreground">{percentText}</div>
-        <Badge className={`text-xs ${badgeClassName}`}>{badgeLabel}</Badge>
-      </div>
-    );
-  };
-
-  // Helper to render categorization badge only
-  const renderCategoryBadge = (category?: string) => {
-    const badgeClassName = !category
-      ? 'bg-blue-500 hover:bg-blue-600 text-white'
-      : category.includes('RED')
-      ? 'bg-red-500 hover:bg-red-600 text-white'
-      : category.includes('YELLOW')
-      ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-      : 'bg-green-500 hover:bg-green-600 text-white';
-    return <Badge className={`text-xs ${badgeClassName}`}>{category || 'N/A'}</Badge>;
-  };
 
   if (loading) {
     return (
@@ -481,7 +312,7 @@ const Teachers = () => {
     }
 
     try {
-      const response = await fetch('http://localhost/deliberation/routes/teachers.php', {
+      const response = await fetch(apiUrl('teachers.php'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -521,7 +352,7 @@ const Teachers = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost/deliberation/routes/teachers.php?id=${selectedTeacher.id}`, {
+      const response = await fetch(apiUrl(`teachers.php?id=${selectedTeacher.id}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -611,7 +442,7 @@ const Teachers = () => {
         });
       }, 200);
 
-      const response = await fetch('http://localhost/deliberation/routes/upload.php', {
+      const response = await fetch(apiUrl('upload.php'), {
         method: 'POST',
         body: formData
       });
@@ -691,17 +522,21 @@ const Teachers = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">Teachers</h1>
           <p className="text-muted-foreground">
             Manage faculty records and performance evaluation
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full md:w-auto justify-end">
+          <Button variant="default" onClick={() => navigate('/reports')}>
+            <BarChart3 className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Reports</span>
+          </Button>
           <Button variant="outline" onClick={downloadTemplate}>
             <Download className="h-4 w-4 mr-2" />
-            Download Template
+            <span className="hidden sm:inline">Download Template</span>
           </Button>
           <div className="relative">
             <input
@@ -714,403 +549,18 @@ const Teachers = () => {
             />
             <Button disabled={isUploading}>
               <Upload className="h-4 w-4 mr-2" />
-              {isUploading ? `Uploading... ${uploadProgress}%` : "Upload CSV"}
+              <span className="hidden sm:inline">{isUploading ? `Uploading... ${uploadProgress}%` : "Upload CSV"}</span>
             </Button>
           </div>
-          <Button 
-            onClick={() => setShowReports(!showReports)} 
-            variant={showReports ? "default" : "outline"}
-            className="mr-2"
-          >
-            <BarChart3 className="h-4 w-4 mr-2" />
-            {showReports ? "Hide Reports" : "View Reports"}
-          </Button>
           <Button onClick={handleAdd}>
             <Plus className="h-4 w-4 mr-2" />
-            Add Teacher
+            <span className="hidden sm:inline">Add Teacher</span>
           </Button>
         </div>
       </div>
 
-      {/* Reports Section */}
-      {showReports && (
-        <div className="space-y-6 mb-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    Teacher Performance Analytics
-                  </CardTitle>
-                  <CardDescription>
-                    Comprehensive analysis of teacher performance across different periods and departments
-                  </CardDescription>
-                </div>
-                <Button onClick={exportReportsData} variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Data
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* Advanced Filters for Reports */}
-              <div className="mb-6 p-4 border rounded-lg bg-muted/50">
-                <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                  <Filter className="h-4 w-4" />
-                  Report Filters
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor="report-department" className="text-sm">Department</Label>
-                    <Select value={reportFilters.department} onValueChange={(value) => setReportFilters(prev => ({ ...prev, department: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All Departments" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">All Departments</SelectItem>
-                        {Array.from(new Set(teachers.map(t => t.department))).map(dept => (
-                          <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="report-performance" className="text-sm">Performance Range</Label>
-                    <Select value={reportFilters.performanceRange} onValueChange={(value) => setReportFilters(prev => ({ ...prev, performanceRange: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All Performance Levels" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Performance Levels</SelectItem>
-                        <SelectItem value="green">Green Zone (0-10%)</SelectItem>
-                        <SelectItem value="yellow">Yellow Zone (10-40%)</SelectItem>
-                        <SelectItem value="red">Red Zone (40%+)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="report-chart" className="text-sm">Chart Type</Label>
-                    <Select value={reportFilters.chartType} onValueChange={(value) => setReportFilters(prev => ({ ...prev, chartType: value }))}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Chart Type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="bar">Bar Chart</SelectItem>
-                        <SelectItem value="line">Line Chart</SelectItem>
-                        <SelectItem value="area">Area Chart</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                
-                <div className="flex justify-end mt-3">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => setReportFilters({ department: '', performanceRange: 'all', chartType: 'bar' })}
-                  >
-                    Reset Filters
-                  </Button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Zone Distribution Pie Chart */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <PieChart className="h-4 w-4" />
-                    Performance Zone Distribution
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <RechartsPieChart>
-                      <Pie
-                        data={getZoneDistributionData()}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({zone, percentage}) => `${zone}: ${percentage}%`}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="count"
-                      >
-                        {getZoneDistributionData().map((entry, index) => (
-                          <Cell 
-                            key={`cell-${index}`} 
-                            fill={
-                              entry.zone === 'Green' ? '#10b981' : 
-                              entry.zone === 'Yellow' ? '#f59e0b' : '#ef4444'
-                            } 
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </RechartsPieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                {/* Department Performance Bar Chart */}
-                <div>
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4" />
-                    Average Performance by Department
-                  </h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={getDepartmentPerformanceData()}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="department" 
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                        fontSize={12}
-                      />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="avgP1Percent" fill="#3b82f6" name="P1 Avg %" />
-                      <Bar dataKey="avgP2Percent" fill="#8b5cf6" name="P2 Avg %" />
-                      <Bar dataKey="avgP3Percent" fill="#06b6d4" name="P3 Avg %" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Dynamic Performance Comparison Chart */}
-              <div className="mt-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Performance Comparison ({reportFilters.chartType.charAt(0).toUpperCase() + reportFilters.chartType.slice(1)} Chart)
-                </h3>
-                <ResponsiveContainer width="100%" height={400}>
-                  {reportFilters.chartType === 'bar' ? (
-                    <BarChart data={getDepartmentPerformanceData()}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="department" 
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                        fontSize={12}
-                      />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="avgP1Percent" fill="#3b82f6" name="P1 Avg %" />
-                      <Bar dataKey="avgP2Percent" fill="#8b5cf6" name="P2 Avg %" />
-                      <Bar dataKey="avgP3Percent" fill="#06b6d4" name="P3 Avg %" />
-                    </BarChart>
-                  ) : reportFilters.chartType === 'line' ? (
-                    <LineChart data={getDepartmentPerformanceData()}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="department" 
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                        fontSize={12}
-                      />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="avgP1Percent" stroke="#3b82f6" name="P1 Avg %" strokeWidth={2} />
-                      <Line type="monotone" dataKey="avgP2Percent" stroke="#8b5cf6" name="P2 Avg %" strokeWidth={2} />
-                      <Line type="monotone" dataKey="avgP3Percent" stroke="#06b6d4" name="P3 Avg %" strokeWidth={2} />
-                    </LineChart>
-                  ) : (
-                    <AreaChart data={getDepartmentPerformanceData()}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis 
-                        dataKey="department" 
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                        fontSize={12}
-                      />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Area type="monotone" dataKey="avgP1Percent" stackId="1" stroke="#3b82f6" fill="#3b82f6" name="P1 Avg %" />
-                      <Area type="monotone" dataKey="avgP2Percent" stackId="2" stroke="#8b5cf6" fill="#8b5cf6" name="P2 Avg %" />
-                      <Area type="monotone" dataKey="avgP3Percent" stackId="3" stroke="#06b6d4" fill="#06b6d4" name="P3 Avg %" />
-                    </AreaChart>
-                  )}
-                </ResponsiveContainer>
-              </div>
-
-              {/* Performance Trends */}
-              <div className="mt-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4" />
-                  Performance Trends Across Periods
-                </h3>
-                <ResponsiveContainer width="100%" height={400}>
-                  <AreaChart data={getPerformanceTrendData().slice(0, 15)}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="name" 
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
-                      fontSize={12}
-                    />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Area 
-                      type="monotone" 
-                      dataKey="p1" 
-                      stackId="1" 
-                      stroke="#3b82f6" 
-                      fill="#3b82f6" 
-                      name="P1 %"
-                      opacity={0.7}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="p2" 
-                      stackId="2" 
-                      stroke="#8b5cf6" 
-                      fill="#8b5cf6" 
-                      name="P2 %"
-                      opacity={0.7}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="p3" 
-                      stackId="3" 
-                      stroke="#06b6d4" 
-                      fill="#06b6d4" 
-                      name="P3 %"
-                      opacity={0.7}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Top Performers */}
-              <div className="mt-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Top 10 Performers (Lowest Failure Rates)
-                </h3>
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={getTopPerformersData()}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="name" 
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
-                      fontSize={12}
-                    />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="avgPercent" fill="#10b981" name="Average Failure %" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Performance Insights */}
-              <div className="mt-8">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4" />
-                  Performance Insights
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Department Performance Ranking</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {getDepartmentPerformanceData()
-                          .sort((a, b) => a.avgP1Percent - b.avgP1Percent)
-                          .slice(0, 5)
-                          .map((dept, index) => (
-                            <div key={dept.department} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium">#{index + 1}</span>
-                                <span className="text-sm">{dept.department}</span>
-                              </div>
-                              <Badge variant={dept.avgP1Percent <= 10 ? "default" : dept.avgP1Percent <= 40 ? "secondary" : "destructive"}>
-                                {dept.avgP1Percent.toFixed(1)}%
-                              </Badge>
-                            </div>
-                          ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Top Performers</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {getTopPerformersData().slice(0, 5).map((teacher, index) => (
-                          <div key={teacher.name} className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">#{index + 1}</span>
-                              <span className="text-sm">{teacher.name}</span>
-                            </div>
-                            <Badge variant={teacher.avgPercent <= 10 ? "default" : teacher.avgPercent <= 40 ? "secondary" : "destructive"}>
-                              {teacher.avgPercent.toFixed(1)}%
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-
-              {/* Summary Statistics */}
-              <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="text-2xl font-bold text-green-600">
-                      {getFilteredTeachers().filter(t => t.zone === 'green').length}
-                    </div>
-                    <p className="text-sm text-muted-foreground">Green Zone Teachers</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="text-2xl font-bold text-yellow-600">
-                      {getFilteredTeachers().filter(t => t.zone === 'yellow').length}
-                    </div>
-                    <p className="text-sm text-muted-foreground">Yellow Zone Teachers</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="text-2xl font-bold text-red-600">
-                      {getFilteredTeachers().filter(t => t.zone === 'red').length}
-                    </div>
-                    <p className="text-sm text-muted-foreground">Red Zone Teachers</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="text-2xl font-bold text-blue-600">
-                      {getFilteredTeachers().length}
-                    </div>
-                    <p className="text-sm text-muted-foreground">Filtered Teachers</p>
-                  </CardContent>
-                </Card>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
       {/* Academic Year and Semester Selectors */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Academic Year:</span>
           <Select value={academicYear} onValueChange={setAcademicYear}>
@@ -1119,8 +569,8 @@ const Teachers = () => {
             </SelectTrigger>
             <SelectContent>
               {academicYears.map((year) => (
-                <SelectItem key={year} value={year}>
-                  {year}
+                <SelectItem key={year} value={String(year)}>
+                  {String(year)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1151,6 +601,7 @@ const Teachers = () => {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="All">All</SelectItem>
               <SelectItem value="P1">P1</SelectItem>
               <SelectItem value="P2">P2</SelectItem>
               <SelectItem value="P3">P3</SelectItem>
@@ -1162,47 +613,10 @@ const Teachers = () => {
       {/* Search and Filters */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Search & Filter</CardTitle>
-              <CardDescription>
-                Find teachers by name, ID, or department
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowFilters(!showFilters)}
-              >
-                <Filter className="h-4 w-4 mr-2" />
-                Filters
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Columns
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {Object.entries(visibleColumns).map(([key, visible]) => (
-                    <DropdownMenuCheckboxItem
-                      key={key}
-                      checked={visible}
-                      onCheckedChange={(checked) =>
-                        setVisibleColumns(prev => ({ ...prev, [key]: checked }))
-                      }
-                    >
-                      {key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
+          <CardTitle>Search & Filter</CardTitle>
+          <CardDescription>
+            Find teachers by name or ID
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -1220,12 +634,12 @@ const Teachers = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t">
                 <div>
                   <Label htmlFor="department-filter">Department</Label>
-                  <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value }))}>
+                  <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value === '__ALL_DEPARTMENTS__' ? '' : value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="All departments" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All departments</SelectItem>
+                      <SelectItem value="__ALL_DEPARTMENTS__">All departments</SelectItem>
                       {departments.map(dept => (
                         <SelectItem key={dept} value={dept}>{dept}</SelectItem>
                       ))}
@@ -1234,12 +648,12 @@ const Teachers = () => {
                 </div>
                 <div>
                   <Label htmlFor="zone-filter">Zone</Label>
-                  <Select value={filters.zone} onValueChange={(value) => setFilters(prev => ({ ...prev, zone: value }))}>
+                  <Select value={filters.zone} onValueChange={(value) => setFilters(prev => ({ ...prev, zone: value === '__ALL_ZONES__' ? '' : value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="All zones" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All zones</SelectItem>
+                      <SelectItem value="__ALL_ZONES__">All zones</SelectItem>
                       {zones.map(zone => (
                         <SelectItem key={zone} value={zone}>
                           {zone.charAt(0).toUpperCase() + zone.slice(1)}
@@ -1250,12 +664,12 @@ const Teachers = () => {
                 </div>
                 <div>
                   <Label htmlFor="status-filter">Status</Label>
-                  <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+                  <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value === '__ALL_STATUSES__' ? '' : value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="All statuses" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All statuses</SelectItem>
+                      <SelectItem value="__ALL_STATUSES__">All statuses</SelectItem>
                       {statuses.map(status => (
                         <SelectItem key={status} value={status}>{status}</SelectItem>
                       ))}
@@ -1271,127 +685,75 @@ const Teachers = () => {
       {/* Teachers Table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Faculty List</CardTitle>
-              <CardDescription>
-                {sortedTeachers.length} teachers found
-                {sortedTeachers.length !== teachers.length && ` (filtered from ${teachers.length} total)`}
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="items-per-page" className="text-sm">Show:</Label>
-              <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
-                <SelectTrigger className="w-20">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5">5</SelectItem>
-                  <SelectItem value="10">10</SelectItem>
-                  <SelectItem value="25">25</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <CardTitle>Faculty List</CardTitle>
+          <CardDescription>
+            {sortedTeachers.length} teachers found
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
+            {/* Horizontal scroll only for this card content */}
+            <div className="w-full max-w-full overflow-x-auto">
+            <Table className="min-w-full border-collapse table-fixed">
               <TableHeader>
-                <TableRow className="bg-white text-black">
+                <TableRow>
                   {visibleColumns.teacher_id && (
-                    <TableHead 
-                      className="cursor-pointer text-black hover:bg-muted/50"
-                      onClick={() => handleSort('teacher_id')}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        Faculty Number
-                        <ArrowUpDown className="h-4 w-4" />
-                      </div>
-                    </TableHead>
+                    <TableHead className="w-40 whitespace-nowrap text-left">Faculty Number</TableHead>
                   )}
                   {visibleColumns.name && (
-                    <TableHead 
-                      className="cursor-pointer text-black hover:bg-muted/50"
-                      onClick={() => handleSort('first_name')}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        Faculty Name
-                        <ArrowUpDown className="h-4 w-4" />
-                      </div>
-                    </TableHead>
+                    <TableHead className="w-56 whitespace-nowrap text-left">Faculty Name</TableHead>
                   )}
                   {visibleColumns.department && (
-                    <TableHead 
-                      className="cursor-pointer text-black hover:bg-muted/50"
-                      onClick={() => handleSort('department')}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        Department
-                        <ArrowUpDown className="h-4 w-4" />
-                      </div>
-                    </TableHead>
+                    <TableHead className="w-44 whitespace-nowrap text-left">Department</TableHead>
                   )}
                   {visibleColumns.enrolled && (
-                    <TableHead 
-                      className="cursor-pointer text-black hover:bg-muted/50"
-                      onClick={() => handleSort('enrolled_students')}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        Number of Enrolled Students
-                        <ArrowUpDown className="h-4 w-4" />
-                      </div>
-                    </TableHead>
+                    <TableHead className="w-64 whitespace-nowrap text-left">Number of Enrolled Students</TableHead>
                   )}
                   {visibleColumns.p1_performance && (
                     <>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P1 Number of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P1 % of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P1 Categorization</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P1 Number of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P1 % of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P1 Categorization</TableHead>
                     </>
                   )}
                   {visibleColumns.p2_performance && (
                     <>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P2 Number of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P2 % of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P2 Categorization</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P2 Number of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P2 % of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P2 Categorization</TableHead>
                     </>
                   )}
                   {visibleColumns.p3_performance && (
                     <>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P3 Number of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P3 % of Failed</TableHead>
-                      <TableHead className="text-black hover:bg-muted/50 font-semibold">P3 Categorization</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P3 Number of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P3 % of Failed</TableHead>
+                      <TableHead className="w-44 whitespace-nowrap text-left">P3 Categorization</TableHead>
                     </>
                   )}
                   {visibleColumns.zone && (
-                    <TableHead 
-                      className="cursor-pointer text-black hover:bg-muted/50"
-                      onClick={() => handleSort('zone')}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        Zone
-                        <ArrowUpDown className="h-4 w-4" />
-                      </div>
-                    </TableHead>
+                    <TableHead className="w-28 whitespace-nowrap text-left">Zone</TableHead>
                   )}
                   {visibleColumns.actions && (
-                    <TableHead className="text-black hover:bg-muted/50 font-semibold">Actions</TableHead>
+                    <TableHead className="w-32 whitespace-nowrap text-left">Actions</TableHead>
                   )}
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {paginatedTeachers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={Object.values(visibleColumns).filter(Boolean).length} className="text-center text-muted-foreground">
+                      No records found for this period
+                    </TableCell>
+                  </TableRow>
+                )}
                 {paginatedTeachers.map((teacher) => (
                   <TableRow key={teacher.id}>
                     {visibleColumns.teacher_id && (
-                      <TableCell className="font-medium">
+                      <TableCell className="w-40 font-medium whitespace-nowrap">
                         {teacher.teacher_id}
                       </TableCell>
                     )}
                     {visibleColumns.name && (
-                      <TableCell>
+                      <TableCell className="w-56 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-muted-foreground" />
                           <span className="truncate max-w-[200px]">
@@ -1401,53 +763,95 @@ const Teachers = () => {
                       </TableCell>
                     )}
                     {visibleColumns.department && (
-                      <TableCell>
+                      <TableCell className="w-44 whitespace-nowrap">
                         <Badge variant="outline" className="truncate max-w-[150px]">
                           {teacher.department}
                         </Badge>
                       </TableCell>
                     )}
                     {visibleColumns.enrolled && (
-                      <TableCell>
+                      <TableCell className="w-64 whitespace-nowrap">
                         <div className="text-sm font-medium">
-                          {teacher.enrolled_students || 0}
+                          {Number(teacher.enrolled_students) || 0}
                         </div>
                       </TableCell>
                     )}
                     {visibleColumns.p1_performance && (
                       <>
-                        <TableCell>{teacher.p1_failed ?? 0}</TableCell>
-                        <TableCell>
-                          {teacher.p1_percent && !isNaN(Number(teacher.p1_percent)) ? `${Number(teacher.p1_percent).toFixed(1)}%` : 'N/A'}
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm">{Number(teacher.p1_failed) || 0}</div>
                         </TableCell>
-                        <TableCell>{renderCategoryBadge(teacher.p1_category)}</TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm text-muted-foreground">
+                            {(() => {
+                              const pct = percentFromData(teacher.p1_percent, teacher.p1_failed, teacher.enrolled_students);
+                              if (pct === null) return 'N/A';
+                              return `${pct.toFixed(2)}%`;
+                            })()}
+                          </div>
+                        </TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          {(() => {
+                            const pct = percentFromData(teacher.p1_percent, teacher.p1_failed, teacher.enrolled_students);
+                            const cat = pct !== null ? categoryFromPercentValue(pct) : (teacher.p1_category || 'N/A');
+                            return <CategoryBadge category={cat} />;
+                          })()}
+                        </TableCell>
                       </>
                     )}
                     {visibleColumns.p2_performance && (
                       <>
-                        <TableCell>{teacher.p2_failed ?? 0}</TableCell>
-                        <TableCell>
-                          {teacher.p2_percent && !isNaN(Number(teacher.p2_percent)) ? `${Number(teacher.p2_percent).toFixed(1)}%` : 'N/A'}
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm">{Number(teacher.p2_failed) || 0}</div>
                         </TableCell>
-                        <TableCell>{renderCategoryBadge(teacher.p2_category)}</TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm text-muted-foreground">
+                            {(() => {
+                              const pct = percentFromData(teacher.p2_percent, teacher.p2_failed, teacher.enrolled_students);
+                              if (pct === null) return 'N/A';
+                              return `${pct.toFixed(2)}%`;
+                            })()}
+                          </div>
+                        </TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          {(() => {
+                            const pct = percentFromData(teacher.p2_percent, teacher.p2_failed, teacher.enrolled_students);
+                            const cat = pct !== null ? categoryFromPercentValue(pct) : (teacher.p2_category || 'N/A');
+                            return <CategoryBadge category={cat} />;
+                          })()}
+                        </TableCell>
                       </>
                     )}
                     {visibleColumns.p3_performance && (
                       <>
-                        <TableCell>{teacher.p3_failed ?? 0}</TableCell>
-                        <TableCell>
-                          {teacher.p3_percent && !isNaN(Number(teacher.p3_percent)) ? `${Number(teacher.p3_percent).toFixed(1)}%` : 'N/A'}
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm">{Number(teacher.p3_failed) || 0}</div>
                         </TableCell>
-                        <TableCell>{renderCategoryBadge(teacher.p3_category)}</TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          <div className="text-sm text-muted-foreground">
+                            {(() => {
+                              const pct = percentFromData(teacher.p3_percent, teacher.p3_failed, teacher.enrolled_students);
+                              if (pct === null) return 'N/A';
+                              return `${pct.toFixed(2)}%`;
+                            })()}
+                          </div>
+                        </TableCell>
+                        <TableCell className="w-44 whitespace-nowrap">
+                          {(() => {
+                            const pct = percentFromData(teacher.p3_percent, teacher.p3_failed, teacher.enrolled_students);
+                            const cat = pct !== null ? categoryFromPercentValue(pct) : (teacher.p3_category || 'N/A');
+                            return <CategoryBadge category={cat} />;
+                          })()}
+                        </TableCell>
                       </>
                     )}
                     {visibleColumns.zone && (
-                      <TableCell>
+                      <TableCell className="w-28 whitespace-nowrap">
                         <ZoneBadge zone={teacher.zone} />
                       </TableCell>
                     )}
                     {visibleColumns.actions && (
-                      <TableCell>
+                      <TableCell className="w-32 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleEdit(teacher)}>
                             <Edit className="h-4 w-4 mr-1" />
@@ -1464,72 +868,41 @@ const Teachers = () => {
                 ))}
               </TableBody>
             </Table>
-          </div>
-          
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
-              <div className="text-sm text-muted-foreground">
-                Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, sortedTeachers.length)} of {sortedTeachers.length} teachers
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </Button>
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const page = i + 1;
-                    return (
-                      <Button
-                        key={page}
-                        variant={currentPage === page ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handlePageChange(page)}
-                        className="w-8 h-8 p-0"
-                      >
-                        {page}
-                      </Button>
-                    );
-                  })}
-                  {totalPages > 5 && (
-                    <>
-                      <span className="text-muted-foreground">...</span>
-                      <Button
-                        variant={currentPage === totalPages ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => handlePageChange(totalPages)}
-                        className="w-8 h-8 p-0"
-                      >
-                        {totalPages}
-                      </Button>
-                    </>
-                  )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
             </div>
-          )}
         </CardContent>
+        {/* Pagination Controls */}
+        <div className="flex items-center justify-between px-6 pb-6">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="itemsPerPage" className="text-sm">Rows per page:</Label>
+            <Select value={String(itemsPerPage)} onValueChange={handleItemsPerPageChange}>
+              <SelectTrigger id="itemsPerPage" className="w-24 h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button variant="outline" size="sm" onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage >= totalPages}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       </Card>
 
       {/* Department Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 aspect-[16/9]">
             <div className="text-2xl font-bold">
               {new Set((teachers || []).map(t => t.department)).size}
             </div>
@@ -1538,7 +911,7 @@ const Teachers = () => {
         </Card>
         
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 aspect-[16/9]">
             <div className="text-2xl font-bold">
               {(teachers || []).filter(t => t.zone === "green").length}
             </div>
@@ -1547,7 +920,7 @@ const Teachers = () => {
         </Card>
         
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-4 aspect-[16/9]">
             <div className="text-2xl font-bold">
               {(teachers || []).filter(t => t.zone === "red").length}
             </div>

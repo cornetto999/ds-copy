@@ -33,9 +33,12 @@ switch ($path) {
     case 'register':
         require __DIR__ . '/routes/register.php';
         break;
+    case 'reset_admin':
+        require __DIR__ . '/routes/reset_admin.php';
+        break;
     default:
         header('Content-Type: application/json');
-        echo json_encode(['status' => 'ok', 'routes' => ['students','teachers','subjects','upload','login','register']]);
+        echo json_encode(['status' => 'ok', 'routes' => ['students','teachers','subjects','upload','login','register','reset_admin']]);
 }
 
 

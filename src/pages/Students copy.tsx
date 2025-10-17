@@ -31,7 +31,6 @@ import {
 import { Plus, Search, AlertTriangle, Edit, Eye, Loader2, Upload, Download } from "lucide-react";
 import ZoneBadge from "@/components/ZoneBadge";
 import { useToast } from "@/hooks/use-toast";
-import { apiUrl } from "@/lib/api";
 
 interface Student {
   id: number;
@@ -41,8 +40,6 @@ interface Student {
   middle_name?: string;
   email?: string;
   program_id?: number;
-  // Optional fields that may be provided by backend; used with fallbacks
-  program_name?: string;
   year_level: number;
   semester: string;
   academic_year: string;
@@ -81,7 +78,7 @@ const Students = () => {
   const fetchStudents = async () => {
     try {
       setLoading(true);
-      const response = await fetch(apiUrl('students.php'));
+      const response = await fetch('http://localhost/deliberation/routes/students.php');
       const data = await response.json();
       setStudents(data);
     } catch (error) {
@@ -161,7 +158,7 @@ const Students = () => {
         at_risk: newStudent.at_risk
       };
 
-      const response = await fetch(apiUrl('students.php'), {
+      const response = await fetch('http://localhost/deliberation/routes/students.php', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -253,7 +250,7 @@ const Students = () => {
         });
       }, 200);
 
-      const response = await fetch(apiUrl('upload.php'), {
+      const response = await fetch('http://localhost/deliberation/routes/upload.php', {
         method: 'POST',
         body: formData
       });
@@ -352,8 +349,8 @@ const Students = () => {
             </SelectTrigger>
             <SelectContent>
               {academicYears.map((year) => (
-                <SelectItem key={year} value={String(year)}>
-                  {String(year)}
+                <SelectItem key={year} value={year}>
+                  {year}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -537,89 +534,70 @@ const Students = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center space-x-2">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search students..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Students Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Student List</CardTitle>
-          <CardDescription>
-            {filteredStudents.length} students found
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Student ID</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Program</TableHead>
-                <TableHead>Year Level</TableHead>
-                <TableHead>Semester</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Zone</TableHead>
-                <TableHead>At Risk</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredStudents.map((student) => (
-                <TableRow key={student.id}>
-                  <TableCell className="font-medium">
-                    {student.student_id}
-                  </TableCell>
-                  <TableCell>{`${student.first_name} ${student.last_name}`}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {student.program_name || 'No Program'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>Year {student.year_level}</TableCell>
-                  <TableCell>{student.semester}</TableCell>
-                  <TableCell>
-                    <Badge variant={student.status === 'Active' ? 'default' : 'secondary'}>
-                      {student.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <ZoneBadge zone={student.zone} />
-                  </TableCell>
-                  <TableCell>
-                    {student.at_risk ? (
-                      <div className="flex items-center gap-1 text-destructive">
-                        <AlertTriangle className="h-4 w-4" />
-                        <span className="text-sm">Yes</span>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">No</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => handleEditStudent(student)}>
-                        <Edit className="h-4 w-4 mr-1" />
-                        Edit
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleViewStudent(student)}>
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table className="min-w-full border-collapse">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student ID</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Program</TableHead>
+                  <TableHead>Year Level</TableHead>
+                  <TableHead>Semester</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Zone</TableHead>
+                  <TableHead>At Risk</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredStudents.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell className="font-medium">
+                      {student.student_id}
+                    </TableCell>
+                    <TableCell>{`${student.first_name} ${student.last_name}`}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {student.program_name || 'No Program'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>Year {student.year_level}</TableCell>
+                    <TableCell>{student.semester}</TableCell>
+                    <TableCell>
+                      <Badge variant={student.status === 'Active' ? 'default' : 'secondary'}>
+                        {student.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <ZoneBadge zone={student.zone} />
+                    </TableCell>
+                    <TableCell>
+                      {student.at_risk ? (
+                        <div className="flex items-center gap-1 text-destructive">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="text-sm">Yes</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">No</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => handleEditStudent(student)}>
+                          <Edit className="h-4 w-4 mr-1" />
+                          Edit
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleViewStudent(student)}>
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -665,7 +643,7 @@ const Students = () => {
           {selectedStudent && (
             <div className="space-y-4">
               <div className="text-sm text-muted-foreground">
-                Editing: {`${selectedStudent.first_name} ${selectedStudent.last_name}`} ({selectedStudent.student_id})
+                Editing: {selectedStudent.name} ({selectedStudent.student_id})
               </div>
               <div className="space-y-2">
                 <Label>Performance Zone</Label>

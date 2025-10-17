@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
+import { apiUrl } from "@/lib/api";
 
 interface DashboardStats {
   totalStudents: number;
@@ -47,20 +48,43 @@ const Dashboard = () => {
   const fetchDashboardStats = async () => {
     try {
       setLoading(true);
-      
-      // Fetch students data
-      const studentsResponse = await fetch('http://localhost/deliberation/routes/students.php');
-      const students = await studentsResponse.json();
-      
-      // Fetch teachers data
-      const teachersResponse = await fetch('http://localhost/deliberation/routes/teachers.php');
-      const teachers = await teachersResponse.json();
-      
-      // Fetch subjects data
-      const subjectsResponse = await fetch('http://localhost/deliberation/routes/subjects.php');
-      const subjects = await subjectsResponse.json();
 
-      // Calculate stats
+      const studentsResponse = await fetch(apiUrl('students.php'));
+      let students: any[] = [];
+      try {
+        const ct = studentsResponse.headers.get('content-type') || '';
+        if (studentsResponse.ok && ct.includes('application/json')) {
+          const parsed = await studentsResponse.json();
+          students = Array.isArray(parsed) ? parsed : [];
+        }
+      } catch (_) {
+        students = [];
+      }
+
+      const teachersResponse = await fetch(apiUrl('teachers.php'));
+      let teachers: any[] = [];
+      try {
+        const ct = teachersResponse.headers.get('content-type') || '';
+        if (teachersResponse.ok && ct.includes('application/json')) {
+          const parsed = await teachersResponse.json();
+          teachers = Array.isArray(parsed) ? parsed : [];
+        }
+      } catch (_) {
+        teachers = [];
+      }
+
+      const subjectsResponse = await fetch(apiUrl('subjects.php'));
+      let subjects: any[] = [];
+      try {
+        const ct = subjectsResponse.headers.get('content-type') || '';
+        if (subjectsResponse.ok && ct.includes('application/json')) {
+          const parsed = await subjectsResponse.json();
+          subjects = Array.isArray(parsed) ? parsed : [];
+        }
+      } catch (_) {
+        subjects = [];
+      }
+
       const totalStudents = students.length;
       const atRiskStudents = students.filter((s: any) => s.at_risk).length;
       const totalTeachers = teachers.length;

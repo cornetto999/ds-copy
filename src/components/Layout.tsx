@@ -36,11 +36,11 @@ const Layout = ({ children }: LayoutProps) => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background overflow-x-hidden">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-        <div className="flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-4">
+      <header className="fixed top-0 z-50 w-full border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+        <div className="container mx-auto flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-4 min-w-0 flex-1">
             <Button
               variant="ghost"
               size="sm"
@@ -49,20 +49,20 @@ const Layout = ({ children }: LayoutProps) => {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <GraduationCap className="h-6 w-6 text-primary" />
-              <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent whitespace-nowrap truncate max-w-[60vw] sm:max-w-none">
                 Deliberation System
               </h1>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 shrink-0">
             <Button
               variant="ghost"
               size="sm"
               onClick={handleLogout}
-              className="gap-2"
+              className="gap-2 md:px-3"
             >
               <LogOut className="h-4 w-4" />
               Logout
@@ -71,7 +71,7 @@ const Layout = ({ children }: LayoutProps) => {
         </div>
       </header>
 
-      <div className="flex">
+      <div className="flex mt-16">
         {/* Sidebar */}
         <aside className={`
           fixed inset-y-0 left-0 z-40 w-64 bg-card border-r transform transition-transform duration-200 ease-in-out mt-16
@@ -100,8 +100,8 @@ const Layout = ({ children }: LayoutProps) => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 md:ml-0">
-          <div className="p-6">
+        <main className="flex-1 md:ml-0 w-full max-w-full">
+          <div className="container mx-auto px-4 py-6 w-full">
             {children}
           </div>
         </main>
