@@ -41,14 +41,34 @@ foreach ($selectedPeriods as $p) {
   $pkey = strtolower($p); // p1/p2/p3
   $green = 0; $yellow = 0; $red = 0;
   foreach ($teachers as $t) {
-    $cat = '';
-    if (isset($t[$pkey . '_category']) && is_string($t[$pkey . '_category'])) {
-      $cat = strtoupper($t[$pkey . '_category']);
+    $percentKey = $pkey . '_percent';
+    $failedKey = $pkey . '_failed';
+
+    $pct = null;
+    $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
+    $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
+    if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
+      $pct = ($failed / $enrolled) * 100.0;
+    } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
+      $pct = floatval($t[$percentKey]);
     }
-    if ($cat === '') { continue; }
-    if (startsWith($cat, 'GREEN')) { $green++; }
-    else if (startsWith($cat, 'YELLOW')) { $yellow++; }
-    else if (startsWith($cat, 'RED')) { $red++; }
+
+    $zone = null;
+    if ($pct !== null) {
+      if ($pct > 40) { $zone = 'red'; }
+      else if ($pct > 10) { $zone = 'yellow'; }
+      else { $zone = 'green'; }
+    } else {
+      $cat = isset($t[$pkey . '_category']) && is_string($t[$pkey . '_category']) ? strtoupper(trim($t[$pkey . '_category'])) : '';
+      if ($cat === '') { continue; }
+      if (startsWith($cat, 'RED')) { $zone = 'red'; }
+      else if (startsWith($cat, 'YELLOW')) { $zone = 'yellow'; }
+      else if (startsWith($cat, 'GREEN')) { $zone = 'green'; }
+    }
+
+    if ($zone === 'green') { $green++; }
+    else if ($zone === 'yellow') { $yellow++; }
+    else if ($zone === 'red') { $red++; }
   }
   $summaryRows[] = [
     'period' => $p,
@@ -83,22 +103,35 @@ if ($includeSemestral) {
 $consistent = ['green' => 0, 'yellow' => 0, 'red' => 0];
 if ($period === 'All') {
   foreach ($teachers as $t) {
-    $zones = [];
+    $hasRed = false; $hasYellow = false; $hasGreen = false;
     foreach ($periods as $p) {
-      $k = strtolower($p) . '_category';
-      $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper(trim($t[$k])) : '';
-      if ($val === '') { continue; }
-      if (startsWith($val, 'GREEN')) { $zones[] = 'green'; }
-      else if (startsWith($val, 'YELLOW')) { $zones[] = 'yellow'; }
-      else if (startsWith($val, 'RED')) { $zones[] = 'red'; }
-    }
-    $countZones = count($zones);
-    if ($countZones >= 2) {
-      $unique = array_values(array_unique($zones));
-      if (count($unique) === 1) {
-        $consistent[$unique[0]]++;
+      $pkey = strtolower($p);
+      $percentKey = $pkey . '_percent';
+      $failedKey = $pkey . '_failed';
+      $pct = null;
+      $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
+      $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
+      if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
+        $pct = ($failed / $enrolled) * 100.0;
+      } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
+        $pct = floatval($t[$percentKey]);
+      }
+      if ($pct !== null) {
+        if ($pct > 40) { $hasRed = true; }
+        else if ($pct > 10) { $hasYellow = true; }
+        else { $hasGreen = true; }
+      } else {
+        $k = $pkey . '_category';
+        $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper(trim($t[$k])) : '';
+        if ($val === '') { continue; }
+        if (startsWith($val, 'RED')) { $hasRed = true; }
+        else if (startsWith($val, 'YELLOW')) { $hasYellow = true; }
+        else if (startsWith($val, 'GREEN')) { $hasGreen = true; }
       }
     }
+    if ($hasRed) { $consistent['red']++; }
+    else if ($hasYellow) { $consistent['yellow']++; }
+    else if ($hasGreen) { $consistent['green']++; }
   }
 } else {
   // Single period: use that period counts
@@ -120,25 +153,60 @@ foreach ($teachers as $t) {
   }
   // For All, aggregate across all periods: count a teacher into zone if majority across periods falls into zone
   if ($period === 'All') {
-    $vote = ['green' => 0, 'yellow' => 0, 'red' => 0];
+    // Worst-case zone across periods using percent-based classification with category fallback
+    $hasRed = false; $hasYellow = false; $hasGreen = false;
     foreach ($periods as $p) {
-      $k = strtolower($p) . '_category';
+      $pkey = strtolower($p);
+      $percentKey = $pkey . '_percent';
+      $failedKey = $pkey . '_failed';
+      $pct = null;
+      $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
+      $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
+      if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
+        $pct = ($failed / $enrolled) * 100.0;
+      } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
+        $pct = floatval($t[$percentKey]);
+      }
+      if ($pct !== null) {
+        if ($pct > 40) { $hasRed = true; }
+        else if ($pct > 10) { $hasYellow = true; }
+        else { $hasGreen = true; }
+      } else {
+        $k = $pkey . '_category';
+        $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper(trim($t[$k])) : '';
+        if ($val === '') continue;
+        if (startsWith($val, 'RED')) { $hasRed = true; }
+        else if (startsWith($val, 'YELLOW')) { $hasYellow = true; }
+        else if (startsWith($val, 'GREEN')) { $hasGreen = true; }
+      }
+    }
+    if ($hasRed) { $departmentMap[$dept]['red']++; }
+    else if ($hasYellow) { $departmentMap[$dept]['yellow']++; }
+    else if ($hasGreen) { $departmentMap[$dept]['green']++; }
+  } else {
+    $pkey = strtolower($period);
+    $percentKey = $pkey . '_percent';
+    $failedKey = $pkey . '_failed';
+    $pct = null;
+    $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
+    $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
+    if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
+      $pct = ($failed / $enrolled) * 100.0;
+    } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
+      $pct = floatval($t[$percentKey]);
+    }
+    if ($pct !== null) {
+      if ($pct > 40) { $departmentMap[$dept]['red']++; }
+      else if ($pct > 10) { $departmentMap[$dept]['yellow']++; }
+      else { $departmentMap[$dept]['green']++; }
+    } else {
+      $k = $pkey . '_category';
       $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper($t[$k]) : '';
       if ($val === '') continue;
-      if (startsWith($val, 'GREEN')) { $vote['green']++; }
-      else if (startsWith($val, 'YELLOW')) { $vote['yellow']++; }
-      else if (startsWith($val, 'RED')) { $vote['red']++; }
+      if (startsWith($val, 'GREEN')) { $departmentMap[$dept]['green']++; }
+      else if (startsWith($val, 'YELLOW')) { $departmentMap[$dept]['yellow']++; }
+      else if (startsWith($val, 'RED')) { $departmentMap[$dept]['red']++; }
     }
-    $winner = 'green'; $max = -1;
-    foreach ($vote as $k => $v) { if ($v > $max) { $max = $v; $winner = $k; } }
-    $departmentMap[$dept][$winner]++;
-  } else {
-    $k = strtolower($period) . '_category';
-    $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper($t[$k]) : '';
-    if ($val === '') continue;
-    if (startsWith($val, 'GREEN')) { $departmentMap[$dept]['green']++; }
-    else if (startsWith($val, 'YELLOW')) { $departmentMap[$dept]['yellow']++; }
-    else if (startsWith($val, 'RED')) { $departmentMap[$dept]['red']++; }
   }
 }
 $departmentChart = array_values($departmentMap);

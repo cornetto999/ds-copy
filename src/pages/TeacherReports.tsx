@@ -39,7 +39,7 @@ const TeacherReports = () => {
   const [programs, setPrograms] = useState<{ id: number; program_name: string }[]>([]);
   const [filters, setFilters] = useState({
     program: "",
-    schoolYear: "2024-2025",
+    schoolYear: "2025-2026",
     semester: "1st",
     period: "All" as "All" | "P1" | "P2" | "P3",
   });
@@ -56,26 +56,41 @@ const TeacherReports = () => {
   // Compute teachers for selected zone and period
   const zoneTeachers = useMemo(() => {
     if (!zoneModalZone) return [] as Teacher[];
-    const z = zoneModalZone.toUpperCase();
-    const startsWithZone = (val?: string) => {
-      const v = (val || '').toUpperCase().trim();
-      return v.startsWith(z);
-    };
-    return (teachers || []).filter(t => {
-      if (filters.period === 'All') {
-        const raw = [t.p1_category, t.p2_category, (t as any).p3_category];
-        const present = raw
-          .map(c => (c || '').toUpperCase().trim())
-          .filter(c => c.length > 0);
-        if (present.length >= 2) {
-          const allSameZone = present.every(c => c.startsWith(z));
-          return allSameZone;
-        }
-        return false;
+    const targetZone = zoneModalZone;
+
+    const getZoneFromValues = (percent?: number | string, failed?: number | string, enrolled?: number | string, category?: string): Zone | null => {
+      const p = Number(percent);
+      const f = Number(failed);
+      const e = Number(enrolled);
+      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
+      if (pct !== null) {
+        if (pct === 0) return "green";
+        if (pct <= 10) return "green";
+        if (pct <= 40) return "yellow";
+        return "red";
       }
-      const key = filters.period.toLowerCase() + '_category';
-      const cat = (t as any)[key] as string | undefined;
-      return startsWithZone(cat);
+      const cat = String(category || "").toUpperCase().trim();
+      if (!cat) return null;
+      if (cat.startsWith("RED")) return "red";
+      if (cat.startsWith("YELLOW")) return "yellow";
+      if (cat.startsWith("GREEN")) return "green";
+      return null;
+    };
+
+    return (teachers || []).filter((t) => {
+      if (filters.period === "All") {
+        const zones: Zone[] = [];
+        (['p1','p2','p3'] as const).forEach((pk) => {
+          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+          if (z) zones.push(z);
+        });
+        // Worst-case zone presence: RED > YELLOW > GREEN
+        const worst: Zone | null = zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
+        return worst === targetZone;
+      }
+      const pk = filters.period.toLowerCase();
+      const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+      return z === targetZone;
     });
   }, [teachers, filters.period, zoneModalZone]);
 
@@ -216,10 +231,17 @@ const TeacherReports = () => {
     const totalEnrolled = (teachers || []).reduce((sum, t) => sum + (Number(t.enrolled_students) || 0), 0);
     const totalFailed = (teachers || []).reduce((sum, t) => {
       if (filters.period === 'All') {
+        // Prefer overall failed_students; fallback to max of period fails if missing
+        const overallFailedRaw = (t as any).failed_students;
+        const overallFailed = Number(overallFailedRaw);
+        if (isFinite(overallFailed) && overallFailed > 0) {
+          return sum + overallFailed;
+        }
         const f1 = Number((t as any).p1_failed) || 0;
         const f2 = Number((t as any).p2_failed) || 0;
         const f3 = Number((t as any).p3_failed) || 0;
-        return sum + f1 + f2 + f3;
+        const fallback = Math.max(f1, f2, f3);
+        return sum + fallback;
       } else {
         const key = `${filters.period.toLowerCase()}_failed` as keyof Teacher;
         return sum + (Number((t as any)[key]) || 0);
@@ -232,19 +254,28 @@ const TeacherReports = () => {
     const counts = { green: 0, yellow: 0, red: 0 };
     (teachers || []).forEach((t) => {
       if (filters.period === 'All') {
-        const votes = { green: 0, yellow: 0, red: 0 };
-        (['p1', 'p2', 'p3'] as const).forEach((pk) => {
-          const cat = String((t as any)[`${pk}_category`] || '').toUpperCase();
-          if (cat.startsWith('GREEN')) votes.green += 1;
-          else if (cat.startsWith('YELLOW')) votes.yellow += 1;
-          else if (cat.startsWith('RED')) votes.red += 1;
+        let hasRed = false, hasYellow = false, hasGreen = false;
+        (['p1','p2','p3'] as const).forEach((pk) => {
+          const dbPercent = (t as any)[`${pk}_percent`];
+          const failed = (t as any)[`${pk}_failed`];
+          const pct = percentFromData(dbPercent, failed, t.enrolled_students);
+          if (pct !== null) {
+            const label = categoryFromPercentValue(pct);
+            if (label.startsWith('RED')) hasRed = true;
+            else if (label.startsWith('YELLOW')) hasYellow = true;
+            else if (label.startsWith('GREEN')) hasGreen = true;
+          } else {
+            const cat = String((t as any)[`${pk}_category`] || '').toUpperCase().trim();
+            if (cat.length === 0) return;
+            if (cat.startsWith('RED')) hasRed = true;
+            else if (cat.startsWith('YELLOW')) hasYellow = true;
+            else if (cat.startsWith('GREEN')) hasGreen = true;
+          }
         });
-        let winner: Zone = 'green';
-        let maxVotes = -1;
-        (['green', 'yellow', 'red'] as const).forEach((z) => {
-          if (votes[z] > maxVotes) { maxVotes = votes[z]; winner = z; }
-        });
-        counts[winner] += 1;
+        if (!hasRed && !hasYellow && !hasGreen) return;
+        if (hasRed) counts.red += 1;
+        else if (hasYellow) counts.yellow += 1;
+        else if (hasGreen) counts.green += 1;
       } else {
         const pk = filters.period.toLowerCase();
         const dbPercent = (t as any)[`${pk}_percent`];
@@ -287,10 +318,182 @@ const TeacherReports = () => {
     return COLOR_RED;
   };
 
-  const totalsChartConfig = {
-    enrolled: { label: "Enrolled", color: COLOR_GREEN },
-    failed: { label: "Failed", color: COLOR_RED },
+  // Compute stacked totals by zone for Enrolled and Failed
+  const stackedTotalsChartConfig = {
+    enrolled_green: { label: "Enrolled GREEN", color: "#22c55e" }, // green-500
+    enrolled_yellow: { label: "Enrolled YELLOW", color: "#facc15" }, // yellow-400
+    enrolled_red: { label: "Enrolled RED", color: "#ef4444" }, // red-500
+    failed_green: { label: "Failed GREEN", color: "#16a34a" }, // green-600 (distinct)
+    failed_yellow: { label: "Failed YELLOW", color: "#ca8a04" }, // yellow-600 (distinct)
+    failed_red: { label: "Failed RED", color: "#b91c1c" }, // red-700 (distinct)
   };
+
+  const totalsStackedData = useMemo(() => {
+    const buckets: Record<string, number> = {
+      enrolled_green: 0,
+      enrolled_yellow: 0,
+      enrolled_red: 0,
+      failed_green: 0,
+      failed_yellow: 0,
+      failed_red: 0,
+    };
+
+    const getZoneFromValues = (
+      percent?: number | string,
+      failed?: number | string,
+      enrolled?: number | string,
+      category?: string
+    ): Zone | null => {
+      const p = Number(percent);
+      const f = Number(failed);
+      const e = Number(enrolled);
+      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
+      if (pct !== null) {
+        if (pct === 0) return "green";
+        if (pct <= 10) return "green";
+        if (pct <= 40) return "yellow";
+        return "red";
+      }
+      const cat = String(category || "").toUpperCase().trim();
+      if (!cat) return null;
+      if (cat.startsWith("RED")) return "red";
+      if (cat.startsWith("YELLOW")) return "yellow";
+      if (cat.startsWith("GREEN")) return "green";
+      return null;
+    };
+
+    const getZoneForTeacher = (t: Teacher): Zone | null => {
+      if (filters.period === "All") {
+        const zones: Zone[] = [];
+        (['p1','p2','p3'] as const).forEach((pk) => {
+          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+          if (z) zones.push(z);
+        });
+        const worst: Zone | null = zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
+        return worst;
+      }
+      const pk = filters.period.toLowerCase();
+      return getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+    };
+
+    (teachers || []).forEach((t) => {
+      const z = getZoneForTeacher(t);
+      if (!z) return;
+
+      const enrolled = Number(t.enrolled_students) || 0;
+      buckets[`enrolled_${z}`] += enrolled;
+
+      let failed = 0;
+      if (filters.period === "All") {
+        const overallFailedRaw = (t as any).failed_students;
+        const overallFailed = Number(overallFailedRaw);
+        if (isFinite(overallFailed) && overallFailed > 0) {
+          failed = overallFailed;
+        } else {
+          const f1 = Number((t as any).p1_failed) || 0;
+          const f2 = Number((t as any).p2_failed) || 0;
+          const f3 = Number((t as any).p3_failed) || 0;
+          failed = Math.max(f1, f2, f3);
+        }
+      } else {
+        const key = `${filters.period.toLowerCase()}_failed` as const;
+        failed = Number((t as any)[key]) || 0;
+      }
+      buckets[`failed_${z}`] += failed;
+    });
+
+    return [{ label: `Totals ${filters.period}`, ...buckets }];
+  }, [teachers, filters.period]);
+
+  // Simple 3-series config for zone totals (one bar per color)
+  const zoneTotalsFailedChartConfig = {
+    green: { label: "GREEN", color: COLOR_GREEN },
+    yellow: { label: "YELLOW", color: COLOR_YELLOW },
+    red: { label: "RED", color: COLOR_RED },
+  };
+
+  // Compute totals of FAILED by zone (one bar per color)
+  const totalsZoneFailedData = useMemo(() => {
+    const buckets: Record<Zone, number> = { green: 0, yellow: 0, red: 0 } as const as Record<Zone, number>;
+
+    const getZoneFromValues = (
+      percent?: number | string,
+      failed?: number | string,
+      enrolled?: number | string,
+      category?: string
+    ): Zone | null => {
+      const p = Number(percent);
+      const f = Number(failed);
+      const e = Number(enrolled);
+      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
+      if (pct !== null) {
+        if (pct === 0) return "green";
+        if (pct <= 10) return "green";
+        if (pct <= 40) return "yellow";
+        return "red";
+      }
+      const cat = String(category || "").toUpperCase().trim();
+      if (!cat) return null;
+      if (cat.startsWith("RED")) return "red";
+      if (cat.startsWith("YELLOW")) return "yellow";
+      if (cat.startsWith("GREEN")) return "green";
+      return null;
+    };
+
+    const getZoneForTeacherLocal = (t: Teacher): Zone | null => {
+      if (filters.period === "All") {
+        const zones: Zone[] = [];
+        (['p1','p2','p3'] as const).forEach((pk) => {
+          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+          if (z) zones.push(z);
+        });
+        return zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
+      }
+      const pk = filters.period.toLowerCase();
+      return getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
+    };
+
+    (teachers || []).forEach((t) => {
+      const z = getZoneForTeacherLocal(t);
+      if (!z) return;
+
+      let failed = 0;
+      if (filters.period === "All") {
+        const overallFailedRaw = (t as any).failed_students;
+        const overallFailed = Number(overallFailedRaw);
+        if (isFinite(overallFailed) && overallFailed > 0) {
+          failed = overallFailed;
+        } else {
+          const f1 = Number((t as any).p1_failed) || 0;
+          const f2 = Number((t as any).p2_failed) || 0;
+          const f3 = Number((t as any).p3_failed) || 0;
+          failed = Math.max(f1, f2, f3);
+        }
+      } else {
+        const key = `${filters.period.toLowerCase()}_failed` as const;
+        failed = Number((t as any)[key]) || 0;
+      }
+
+      buckets[z] += failed;
+    });
+
+    return [{ label: `Totals ${filters.period}`, ...buckets }];
+  }, [teachers, filters.period]);
+  // Compute aggregated failed percent for totals chart
+  const totalsPercent = useMemo(() => {
+    const row = (totalsData && totalsData[0]) ? totalsData[0] : null;
+    if (!row) return null;
+    const e = Number(row.enrolled || 0);
+    const f = Number(row.failed || 0);
+    if (!isFinite(e) || e <= 0 || !isFinite(f)) return null;
+    return (f / e) * 100;
+  }, [totalsData]);
+
+  // Dynamic colors: failed bar reflects zone thresholds (green/yellow/red)
+  const totalsChartConfig = useMemo(() => ({
+    enrolled: { label: "Enrolled", color: COLOR_GREEN },
+    failed: { label: "Failed", color: totalsPercent !== null ? getColorForPercent(totalsPercent) : COLOR_RED },
+  }), [totalsPercent]);
 
   // Colors for category chart
   const categoryChartColors = {
@@ -309,12 +512,12 @@ const TeacherReports = () => {
   const totalTeachersSelected = useMemo(() => {
     const rows = (summary || []).filter((row) => row.period !== 'SEMESTRAL');
     if (filters.period === 'All') {
-      const first = rows[0];
-      return first ? Number(first.total_teachers || 0) : 0;
+      // Use actual count of teachers loaded to avoid mismatched denominators
+      return (teachers || []).length;
     }
     const match = rows.find((r) => r.period === filters.period);
     return match ? Number(match.total_teachers || 0) : 0;
-  }, [summary, filters.period]);
+  }, [summary, filters.period, teachers]);
 
   if (loading) {
     return (
@@ -361,7 +564,14 @@ const TeacherReports = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Input className="h-8 w-full text-sm" placeholder="School Year" value={filters.schoolYear} onChange={(e) => setFilters((f) => ({ ...f, schoolYear: e.target.value }))} />
+            <Select value={filters.schoolYear} onValueChange={(v) => setFilters((f) => ({ ...f, schoolYear: v }))}>
+              <SelectTrigger className="h-8 w-full text-sm"><SelectValue placeholder="School Year" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2023-2024">2023-2024</SelectItem>
+                <SelectItem value="2024-2025">2024-2025</SelectItem>
+                <SelectItem value="2025-2026">2025-2026</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={filters.semester} onValueChange={(v) => setFilters((f) => ({ ...f, semester: v }))}>
               <SelectTrigger className="h-8 w-full text-sm"><SelectValue placeholder="Semester" /></SelectTrigger>
               <SelectContent>
@@ -616,18 +826,19 @@ const TeacherReports = () => {
         <Card>
           <CardHeader>
             <CardTitle>Total Enrolled vs Failed ({filters.period})</CardTitle>
-            <CardDescription>Aggregated counts across all teachers</CardDescription>
+            <CardDescription>GREEN vs YELLOW vs RED — one bar each</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={totalsChartConfig}>
-              <BarChart data={totalsData}>
+            <ChartContainer config={zoneTotalsFailedChartConfig}>
+              <BarChart data={totalsZoneFailedData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <ChartLegend content={<ChartLegendContent />} />
-                <Bar dataKey="enrolled" fill={COLOR_GREEN} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="failed" fill={COLOR_RED} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="green" fill="var(--color-green)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="yellow" fill="var(--color-yellow)" />
+                <Bar dataKey="red" fill="var(--color-red)" />
               </BarChart>
             </ChartContainer>
           </CardContent>
