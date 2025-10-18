@@ -1,148 +1,129 @@
 <?php
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+require_once __DIR__ . '/../load_env.php';
+require_once __DIR__ . '/../api/headers.php';
+require_once __DIR__ . '/../config/connection.php';
+require_once __DIR__ . '/../models/Student.php';
+require_once __DIR__ . '/../models/Teacher.php';
+require_once __DIR__ . '/../models/Subject.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+function detectDelimiter(string $line): string {
+    $delimiters = [',', ';', '\t'];
+    $counts = [];
+    foreach ($delimiters as $d) { $counts[$d] = substr_count($line, $d); }
+    arsort($counts);
+    return key($counts);
 }
 
-require_once '../config/connection.php';
-require_once '../models/Student.php';
-require_once '../models/Teacher.php';
-require_once '../models/Subject.php';
-require_once '../models/Program.php';
-
-// Check if file was uploaded
-if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-    http_response_code(400);
-    echo json_encode(['error' => 'No file uploaded or upload error']);
-    exit;
+function canonicalizeHeader(string $h): string {
+    $h = strtolower(trim($h));
+    $map = [
+        'teacherid' => 'teacher_id',
+        'id' => 'teacher_id',
+        'facultyname' => 'FacultyName',
+        'faculty_name' => 'FacultyName',
+        'faculty name' => 'FacultyName',
+        'name' => 'FacultyName',
+        'teachername' => 'FacultyName',
+        'instructorname' => 'FacultyName',
+        'firstname' => 'first_name',
+        'lastname' => 'last_name',
+        'enrolledstudents' => 'EnrolledStudents',
+        'enrolled' => 'EnrolledStudents',
+        'totalenrolled' => 'EnrolledStudents',
+        'numberofenrolledstudents' => 'EnrolledStudents',
+        'noofenrolledstudents' => 'EnrolledStudents',
+        'p1failed' => 'P1_Failed',
+        'p1numberoffailed' => 'P1_Failed',
+        'p1percent' => 'P1_Percent',
+        'p1percentfailed' => 'P1_Percent',
+        'p1percentoffailed' => 'P1_Percent',
+        'p1offailed' => 'P1_Percent',
+        'p1category' => 'P1_Category',
+        'p1categorization' => 'P1_Category',
+        'p2failed' => 'P2_Failed',
+        'p2numberoffailed' => 'P2_Failed',
+        'p2percent' => 'P2_Percent',
+        'p2percentfailed' => 'P2_Percent',
+        'p2percentoffailed' => 'P2_Percent',
+        'p2offailed' => 'P2_Percent',
+        'p2category' => 'P2_Category',
+        'p2categorization' => 'P2_Category',
+        'p3failed' => 'P3_Failed',
+        'p3numberoffailed' => 'P3_Failed',
+        'p3percent' => 'P3_Percent',
+        'p3percentfailed' => 'P3_Percent',
+        'p3percentoffailed' => 'P3_Percent',
+    ];
+    return $map[$h] ?? $h;
 }
 
-$file = $_FILES['file'];
-$uploadType = $_POST['type'] ?? 'students';
-
-// Validate file type - support CSV and provide helpful error for Excel
-$allowedTypes = ['text/csv', 'text/plain', 'application/csv'];
-$fileType = $file['type'];
-$fileName = $file['name'];
-$fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-
-// Check if it's an Excel file
-$isExcelFile = in_array($fileExtension, ['xlsx', 'xls']) || 
-               in_array($fileType, ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel']);
-
-if ($isExcelFile) {
-    http_response_code(400);
-    echo json_encode([
-        'error' => 'Excel files are not directly supported. Please convert your Excel file to CSV format:',
-        'instructions' => [
-            '1. Open your Excel file',
-            '2. Go to File > Save As',
-            '3. Choose "CSV (Comma delimited)" format',
-            '4. Save the file',
-            '5. Upload the CSV file instead'
-        ],
-        'supported_formats' => ['CSV (.csv)'],
-        'file_type_detected' => $fileExtension
-    ]);
-    exit;
-}
-
-// Check if it's a valid CSV file
-$isValidType = in_array($fileType, $allowedTypes) || $fileExtension === 'csv';
-
-if (!$isValidType) {
-    http_response_code(400);
-    echo json_encode([
-        'error' => 'Invalid file type. Please upload CSV files only.',
-        'supported_formats' => ['CSV (.csv)'],
-        'file_type_detected' => $fileExtension
-    ]);
-    exit;
-}
-
-// Create uploads directory if it doesn't exist
-$uploadDir = '../uploads/';
-if (!is_dir($uploadDir)) {
-    mkdir($uploadDir, 0755, true);
-}
-
-// Generate unique filename
-$fileName = uniqid() . '_' . $file['name'];
-$filePath = $uploadDir . $fileName;
-
-// Move uploaded file
-if (!move_uploaded_file($file['tmp_name'], $filePath)) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Failed to save uploaded file']);
-    exit;
+function parseInt($v): int { return intval(str_replace([',',' '], '', strval($v))); }
+function parsePercent($v): float {
+    $s = trim(strval($v));
+    $s = str_replace('%','',$s);
+    $n = floatval($s);
+    return is_nan($n) ? 0.0 : $n;
 }
 
 try {
-    $data = parseFile($filePath, $fileType);
-    $result = processData($data, $uploadType, $conn);
-    
-    // Clean up uploaded file
-    unlink($filePath);
-    
-    echo json_encode([
-        'success' => true,
-        'message' => "Successfully imported {$result['count']} {$uploadType} records",
-        'count' => $result['count'],
-        'errors' => $result['errors'] ?? []
-    ]);
-    
-} catch (Exception $e) {
-    // Clean up uploaded file
-    if (file_exists($filePath)) {
-        unlink($filePath);
-    }
-    
-    http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
-}
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') { http_response_code(405); echo json_encode(['error' => 'Method Not Allowed']); exit; }
 
-function parseFile($filePath, $fileType) {
-    $data = [];
-    
-    if ($fileType === 'text/csv') {
-        // Parse CSV
-        $handle = fopen($filePath, 'r');
-        if ($handle) {
-            $headers = fgetcsv($handle);
-            while (($row = fgetcsv($handle)) !== false) {
-                $data[] = array_combine($headers, $row);
-            }
-            fclose($handle);
-        }
-    } else {
-        // For Excel files, we need to use a different approach
-        // Since we don't have PhpSpreadsheet installed, we'll try to convert to CSV first
-        // or provide a clear error message
-        throw new Exception('Excel file parsing requires PhpSpreadsheet library. Please convert your Excel file to CSV format or install the required dependencies.');
-    }
-    
-    return $data;
-}
+    if (!isset($_FILES['file'])) { http_response_code(400); echo json_encode(['error' => 'No file uploaded']); exit; }
 
-function processData($data, $type, $conn) {
-    $count = 0;
-    $errors = [];
-    
-    switch ($type) {
+    $file = $_FILES['file'];
+    if ($file['error'] !== UPLOAD_ERR_OK) { http_response_code(400); echo json_encode(['error' => 'Upload error']); exit; }
+
+    $tmpPath = $file['tmp_name'];
+    $name = $file['name'];
+
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    if (!in_array($ext, ['csv'])) { http_response_code(400); echo json_encode(['error' => 'Only CSV files are supported. Export your Excel sheet as CSV first.','instructions' => ['Open your Excel file','Click File > Save As','Choose CSV (Comma delimited) (*.csv)','Upload the CSV here.']]); exit; }
+
+    $uploadName = uniqid() . '_' . preg_replace('/[^a-zA-Z0-9_.-]/', '_', $name);
+    $destPath = __DIR__ . '/../uploads/' . $uploadName;
+    if (!move_uploaded_file($tmpPath, $destPath)) { http_response_code(500); echo json_encode(['error' => 'Failed to store uploaded file']); exit; }
+
+    $fh = fopen($destPath, 'r');
+    if (!$fh) { http_response_code(500); echo json_encode(['error' => 'Failed to read uploaded file']); exit; }
+
+    $firstLine = fgets($fh);
+    if ($firstLine === false) { fclose($fh); echo json_encode(['error' => 'Empty file']); exit; }
+
+    $delimiter = detectDelimiter($firstLine);
+    rewind($fh);
+
+    $headers = fgetcsv($fh, 0, $delimiter);
+    if (!$headers || count($headers) === 0) { fclose($fh); echo json_encode(['error' => 'Invalid CSV header']); exit; }
+    $headers = array_map('canonicalizeHeader', $headers);
+
+    $rows = [];
+    while (($data = fgetcsv($fh, 0, $delimiter)) !== false) {
+        $row = [];
+        foreach ($headers as $i => $h) { $row[$h] = $data[$i] ?? ''; }
+        $rows[] = $row;
+    }
+    fclose($fh);
+
+    $db = new DatabaseConnection();
+    $pdo = $db->pdo();
+
+    $kind = $_POST['kind'] ?? 'teachers';
+    $count = 0; $errors = [];
+
+    switch ($kind) {
         case 'students':
-            $student = new StudentModel($conn);
-            foreach ($data as $row) {
+            $student = new StudentModel($pdo);
+            foreach ($rows as $row) {
                 try {
                     $studentData = [
                         'student_id' => $row['student_id'] ?? '',
                         'first_name' => $row['first_name'] ?? '',
                         'last_name' => $row['last_name'] ?? '',
-                        'email' => $row['email'] ?? '',
-                        'program' => $row['program'] ?? 'BSIT',
+                        'middle_name' => $row['middle_name'] ?? null,
+                        'email' => $row['email'] ?? null,
+                        'program_name' => $row['program'] ?? 'BSIT',
+                        'academic_year' => $row['academic_year'] ?? '2024-2025',
+                        'semester' => $row['semester'] ?? '1st',
                         'year_level' => $row['year_level'] ?? '1st Year',
                         'status' => $row['status'] ?? 'active',
                         'gpa' => $row['gpa'] ?? null,
@@ -158,14 +139,13 @@ function processData($data, $type, $conn) {
             break;
             
         case 'teachers':
-            $teacher = new TeacherModel($conn);
-            foreach ($data as $row) {
+            $teacher = new TeacherModel($pdo);
+            foreach ($rows as $row) {
                 try {
-                    // Handle both old format and new performance format
                     $teacherData = [
                         'teacher_id' => $row['FacultyNo'] ?? $row['teacher_id'] ?? '',
                         'first_name' => $row['FacultyName'] ?? $row['first_name'] ?? '',
-                        'last_name' => '', // Will be extracted from FacultyName
+                        'last_name' => '',
                         'middle_name' => null,
                         'email' => $row['email'] ?? null,
                         'department' => $row['department'] ?? 'General',
@@ -173,28 +153,29 @@ function processData($data, $type, $conn) {
                         'status' => $row['status'] ?? 'Active',
                         'zone' => $row['zone'] ?? 'green',
                         'notes' => $row['notes'] ?? null,
-                        'enrolled_students' => (int)($row['EnrolledStudents'] ?? $row['enrolled_students'] ?? 0),
-                        'p1_failed' => (int)($row['P1_Failed'] ?? $row['p1_failed'] ?? 0),
-                        'p1_percent' => (float)($row['P1_Percent'] ?? $row['p1_percent'] ?? 0.00),
-                        'p1_category' => $row['P1_Category'] ?? $row['p1_category'] ?? 'GREEN (0.01%-10%)',
-                        'p2_failed' => (int)($row['P2_Failed'] ?? $row['p2_failed'] ?? 0),
-                        'p2_percent' => (float)($row['P2_Percent'] ?? $row['p2_percent'] ?? 0.00),
-                        'p2_category' => $row['P2_Category'] ?? $row['p2_category'] ?? 'GREEN (0.01%-10%)'
+                        'enrolled_students' => parseInt($row['EnrolledStudents'] ?? $row['enrolled_students'] ?? 0),
+                        'p1_failed' => parseInt($row['P1_Failed'] ?? $row['p1_failed'] ?? 0),
+                        'p1_percent' => parsePercent($row['P1_Percent'] ?? $row['p1_percent'] ?? 0.00),
+                        'p1_category' => $row['P1_Category'] ?? $row['p1_category'] ?? 'GREEN (0%)',
+                        'p2_failed' => parseInt($row['P2_Failed'] ?? $row['p2_failed'] ?? 0),
+                        'p2_percent' => parsePercent($row['P2_Percent'] ?? $row['p2_percent'] ?? 0.00),
+                        'p2_category' => $row['P2_Category'] ?? $row['p2_category'] ?? 'GREEN (0%)',
+                        'p3_failed' => parseInt($row['P3_Failed'] ?? $row['p3_failed'] ?? 0),
+                        'p3_percent' => parsePercent($row['P3_Percent'] ?? $row['p3_percent'] ?? 0.00),
+                        'p3_category' => $row['P3_Category'] ?? $row['p3_category'] ?? 'GREEN (0%)'
                     ];
                     
-                    // Extract first and last name from FacultyName if using new format
                     if (isset($row['FacultyName']) && !empty($row['FacultyName'])) {
                         $nameParts = explode(' ', trim($row['FacultyName']));
                         if (count($nameParts) >= 2) {
-                            $teacherData['last_name'] = array_pop($nameParts); // Last part is last name
-                            $teacherData['first_name'] = implode(' ', $nameParts); // Everything else is first name
+                            $teacherData['last_name'] = array_pop($nameParts);
+                            $teacherData['first_name'] = implode(' ', $nameParts);
                         } else {
                             $teacherData['first_name'] = $row['FacultyName'];
                             $teacherData['last_name'] = '';
                         }
                     }
                     
-                    // Validate required fields
                     if (empty($teacherData['teacher_id']) || empty($teacherData['first_name'])) {
                         throw new Exception('Missing required fields: FacultyNo/teacher_id and FacultyName/first_name');
                     }
@@ -208,8 +189,8 @@ function processData($data, $type, $conn) {
             break;
             
         case 'subjects':
-            $subject = new SubjectModel($conn);
-            foreach ($data as $row) {
+            $subject = new Subject($pdo);
+            foreach ($rows as $row) {
                 try {
                     $subjectData = [
                         'subject_code' => $row['subject_code'] ?? '',
@@ -230,6 +211,6 @@ function processData($data, $type, $conn) {
             break;
     }
     
-    return ['count' => $count, 'errors' => $errors];
+    echo json_encode(['count' => $count, 'errors' => $errors, 'success' => true]);
+    exit;
 }
-?>

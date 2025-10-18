@@ -26,14 +26,13 @@ This is a comprehensive deliberation system for PHINMA COC that tracks student p
 ### Option 1: Automatic Setup (Recommended)
 
 1. Place the project files in your web server directory (e.g., `htdocs/deliberation/`)
-2. Run the setup script in your browser: `http://localhost/deliberation/setup_database.php`
-3. Or run from command line: `php setup_database.php`
+2. Run the setup script in your browser: `http://localhost/deliberation/setup.php` (or `http://localhost:8001/setup.php` with PHP built-in server)
+3. Or run from command line: `php backend/setup.php`
 
 ### Option 2: Manual Setup
 
-1. Create a MySQL database named `school_db`
-2. Import the schema: `mysql -u root -p school_db < backend/schema.sql`
-3. Import sample data: `mysql -u root -p school_db < backend/phinma_coc_data.sql`
+1. Create a MySQL database named `deliberation`
+2. Import the schema: `mysql -u root -p deliberation < backend/schema.sql`
 
 ## Configuration
 
@@ -43,7 +42,7 @@ Update `backend/config/connection.php` with your database credentials:
 
 ```php
 private $host = 'localhost';
-private $dbname = 'school_db';
+private $dbname = 'deliberation';
 private $username = 'root';
 private $password = 'your_password';
 ```

@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/config/connection.php';
-require_once __DIR__ . '/models/Teacher.php';
+require_once __DIR__ . '/models/teacher.php';
 
 try {
     $db = new DatabaseConnection();

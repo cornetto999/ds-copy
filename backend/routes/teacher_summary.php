@@ -1,11 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
+require_once __DIR__ . '/../api/headers.php';
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') { http_response_code(405); echo json_encode(['error' => 'Method Not Allowed']); exit; }
 
 require_once __DIR__ . '/../models/Teacher.php';
@@ -20,52 +16,95 @@ function safe_get(string $key, $default = null) {
 }
 
 $program = safe_get('program', '');
+$programIdParam = isset($_GET['program_id']) ? intval($_GET['program_id']) : null;
 $school_year = safe_get('school_year', '2024-2025');
 $semester = safe_get('semester', '1st');
 $period = safe_get('period', 'All'); // All | P1 | P2 | P3
+$debug = (strtolower(safe_get('debug', '0')) === '1' || strtolower(safe_get('debug', 'false')) === 'true');
 
-$teacherModel = TeacherModel::withDefaultConnection();
+$db = new DatabaseConnection();
+$pdo = $db->pdo();
+$teacherModel = new TeacherModel($pdo);
+
+// Resolve program id if a non-empty program name is provided and program_id is not set
+$programId = null;
+if ($programIdParam && $programIdParam > 0) {
+  $programId = $programIdParam;
+} else if ($program !== '') {
+  $stmt = $pdo->prepare('SELECT id FROM programs WHERE program_name = ? LIMIT 1');
+  $stmt->execute([$program]);
+  $found = $stmt->fetch();
+  if ($found && isset($found['id'])) { $programId = intval($found['id']); }
+}
+
 $teachers = $teacherModel->all();
-
-// NOTE: Current teacher schema does not include school_year/semester/program.
-// We accept filters for forward compatibility but do not apply them to DB yet.
-// Summary is computed from existing teacher columns: p1_category, p2_category, p3_category and department.
+// Recompute per-teacher aggregated stats based on filters so period zones use the filtered denominator
+$teachersEnriched = [];
+foreach ($teachers as $t) {
+  $stats = $teacherModel->aggregateStatsForTeacher(intval($t['id']), $school_year, $semester, $programId);
+  $enrolled = intval($stats['enrolled_students'] ?? 0);
+  $failed = intval($stats['failed_students'] ?? 0);
+  if ($enrolled > 0 || $failed > 0) {
+    $teachersEnriched[] = array_merge($t, $stats);
+  } else {
+    $teachersEnriched[] = $t;
+  }
+}
+$teachers = $teachersEnriched;
 
 $periods = ['P1','P2','P3'];
 $selectedPeriods = ($period === 'All') ? $periods : [$period];
-
 $totalTeachers = count($teachers);
 
+// Helper: map category label to zone
+function zoneFromCategoryLabel(string $cat): ?string {
+  $u = strtoupper(trim($cat));
+  if ($u === '') return null;
+  if (str_starts_with($u, 'RED')) return 'red';
+  if (str_starts_with($u, 'YELLOW')) return 'yellow';
+  if (str_starts_with($u, 'GREEN')) return 'green';
+  return null;
+}
+
+// Helper: zone from percentage using 10/40 thresholds
+function zoneFromPercent(float $pct): string {
+  if ($pct <= 0) return 'green';
+  if ($pct <= 10) return 'green';
+  if ($pct <= 40) return 'yellow';
+  return 'red';
+}
+
+// Helper: determine zone for a teacher row in a given period key ('p1'|'p2'|'p3')
+function zoneForTeacherPeriod(array $t, string $pk): ?string {
+  $percentKey = $pk . '_percent';
+  $failedKey = $pk . '_failed';
+  $categoryKey = $pk . '_category';
+  $dbPercentRaw = $t[$percentKey] ?? null;
+  $failedRaw = $t[$failedKey] ?? null;
+  $enrolledRaw = $t['enrolled_students'] ?? null;
+
+  $dbPercent = is_numeric($dbPercentRaw) ? floatval($dbPercentRaw) : null;
+  $failed = is_numeric($failedRaw) ? floatval($failedRaw) : null;
+  $enrolled = is_numeric($enrolledRaw) ? floatval($enrolledRaw) : null;
+
+  if ($failed !== null && $enrolled !== null && $enrolled > 0) {
+    $pct = ($failed / $enrolled) * 100.0;
+    return zoneFromPercent($pct);
+  }
+  if ($dbPercent !== null) {
+    return zoneFromPercent($dbPercent);
+  }
+  $cat = isset($t[$categoryKey]) ? strval($t[$categoryKey]) : '';
+  return zoneFromCategoryLabel($cat);
+}
+
+// Compute zone counts per selected period using period-based fields
 $summaryRows = [];
 foreach ($selectedPeriods as $p) {
-  $pkey = strtolower($p); // p1/p2/p3
   $green = 0; $yellow = 0; $red = 0;
+  $pk = strtolower($p);
   foreach ($teachers as $t) {
-    $percentKey = $pkey . '_percent';
-    $failedKey = $pkey . '_failed';
-
-    $pct = null;
-    $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
-    $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
-    if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
-      $pct = ($failed / $enrolled) * 100.0;
-    } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
-      $pct = floatval($t[$percentKey]);
-    }
-
-    $zone = null;
-    if ($pct !== null) {
-      if ($pct > 40) { $zone = 'red'; }
-      else if ($pct > 10) { $zone = 'yellow'; }
-      else { $zone = 'green'; }
-    } else {
-      $cat = isset($t[$pkey . '_category']) && is_string($t[$pkey . '_category']) ? strtoupper(trim($t[$pkey . '_category'])) : '';
-      if ($cat === '') { continue; }
-      if (startsWith($cat, 'RED')) { $zone = 'red'; }
-      else if (startsWith($cat, 'YELLOW')) { $zone = 'yellow'; }
-      else if (startsWith($cat, 'GREEN')) { $zone = 'green'; }
-    }
-
+    $zone = zoneForTeacherPeriod($t, $pk);
     if ($zone === 'green') { $green++; }
     else if ($zone === 'yellow') { $yellow++; }
     else if ($zone === 'red') { $red++; }
@@ -82,9 +121,8 @@ foreach ($selectedPeriods as $p) {
   ];
 }
 
-// Semestral row: placeholder with dashes to match requested layout
-$includeSemestral = ($period === 'All');
-if ($includeSemestral) {
+// Include SEMESTRAL placeholder for layout parity when period === All
+if ($period === 'All') {
   $summaryRows[] = [
     'period' => 'SEMESTRAL',
     'total_teachers' => null,
@@ -97,124 +135,82 @@ if ($includeSemestral) {
   ];
 }
 
-// Consistent zone counts for the selected period(s)
-// For a single period, consistent == counts in that period.
-// For All, treat a teacher as consistent if all non-empty period categories are the same zone (require at least 2 periods).
+// Consistent zone counts: worst-case across periods when All; else mirror single period
 $consistent = ['green' => 0, 'yellow' => 0, 'red' => 0];
 if ($period === 'All') {
   foreach ($teachers as $t) {
-    $hasRed = false; $hasYellow = false; $hasGreen = false;
-    foreach ($periods as $p) {
-      $pkey = strtolower($p);
-      $percentKey = $pkey . '_percent';
-      $failedKey = $pkey . '_failed';
-      $pct = null;
-      $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
-      $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
-      if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
-        $pct = ($failed / $enrolled) * 100.0;
-      } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
-        $pct = floatval($t[$percentKey]);
-      }
-      if ($pct !== null) {
-        if ($pct > 40) { $hasRed = true; }
-        else if ($pct > 10) { $hasYellow = true; }
-        else { $hasGreen = true; }
-      } else {
-        $k = $pkey . '_category';
-        $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper(trim($t[$k])) : '';
-        if ($val === '') { continue; }
-        if (startsWith($val, 'RED')) { $hasRed = true; }
-        else if (startsWith($val, 'YELLOW')) { $hasYellow = true; }
-        else if (startsWith($val, 'GREEN')) { $hasGreen = true; }
-      }
+    $zones = [];
+    foreach (['p1','p2','p3'] as $pk) {
+      $z = zoneForTeacherPeriod($t, $pk);
+      if ($z) $zones[] = $z;
     }
-    if ($hasRed) { $consistent['red']++; }
-    else if ($hasYellow) { $consistent['yellow']++; }
-    else if ($hasGreen) { $consistent['green']++; }
+    if (in_array('red', $zones, true)) { $consistent['red']++; }
+    else if (in_array('yellow', $zones, true)) { $consistent['yellow']++; }
+    else if (in_array('green', $zones, true)) { $consistent['green']++; }
   }
 } else {
-  // Single period: use that period counts
   $match = null;
   foreach ($summaryRows as $row) { if ($row['period'] === $period) { $match = $row; break; } }
   if ($match) {
-    $consistent['green'] = $match['green_count'];
-    $consistent['yellow'] = $match['yellow_count'];
-    $consistent['red'] = $match['red_count'];
+    $consistent['green'] = intval($match['green_count'] ?? 0);
+    $consistent['yellow'] = intval($match['yellow_count'] ?? 0);
+    $consistent['red'] = intval($match['red_count'] ?? 0);
   }
 }
 
-// Department chart data: counts per department by zone for selected period(s)
+// Department chart: counts per department by period-based zone
 $departmentMap = [];
 foreach ($teachers as $t) {
   $dept = isset($t['department']) ? strval($t['department']) : 'Unknown';
   if (!isset($departmentMap[$dept])) {
     $departmentMap[$dept] = ['department' => $dept, 'period' => $period, 'green' => 0, 'yellow' => 0, 'red' => 0];
   }
-  // For All, aggregate across all periods: count a teacher into zone if majority across periods falls into zone
   if ($period === 'All') {
-    // Worst-case zone across periods using percent-based classification with category fallback
-    $hasRed = false; $hasYellow = false; $hasGreen = false;
-    foreach ($periods as $p) {
-      $pkey = strtolower($p);
-      $percentKey = $pkey . '_percent';
-      $failedKey = $pkey . '_failed';
-      $pct = null;
-      $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
-      $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
-      if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
-        $pct = ($failed / $enrolled) * 100.0;
-      } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
-        $pct = floatval($t[$percentKey]);
-      }
-      if ($pct !== null) {
-        if ($pct > 40) { $hasRed = true; }
-        else if ($pct > 10) { $hasYellow = true; }
-        else { $hasGreen = true; }
-      } else {
-        $k = $pkey . '_category';
-        $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper(trim($t[$k])) : '';
-        if ($val === '') continue;
-        if (startsWith($val, 'RED')) { $hasRed = true; }
-        else if (startsWith($val, 'YELLOW')) { $hasYellow = true; }
-        else if (startsWith($val, 'GREEN')) { $hasGreen = true; }
-      }
+    $zones = [];
+    foreach (['p1','p2','p3'] as $pk) {
+      $z = zoneForTeacherPeriod($t, $pk);
+      if ($z) $zones[] = $z;
     }
-    if ($hasRed) { $departmentMap[$dept]['red']++; }
-    else if ($hasYellow) { $departmentMap[$dept]['yellow']++; }
-    else if ($hasGreen) { $departmentMap[$dept]['green']++; }
+    $zFinal = in_array('red', $zones, true) ? 'red' : (in_array('yellow', $zones, true) ? 'yellow' : (in_array('green', $zones, true) ? 'green' : null));
+    if ($zFinal) { $departmentMap[$dept][$zFinal]++; }
   } else {
-    $pkey = strtolower($period);
-    $percentKey = $pkey . '_percent';
-    $failedKey = $pkey . '_failed';
-    $pct = null;
-    $enrolled = isset($t['enrolled_students']) && is_numeric($t['enrolled_students']) ? intval($t['enrolled_students']) : null;
-    $failed = isset($t[$failedKey]) && is_numeric($t[$failedKey]) ? intval($t[$failedKey]) : null;
-    if ($enrolled !== null && $enrolled > 0 && $failed !== null) {
-      $pct = ($failed / $enrolled) * 100.0;
-    } else if (isset($t[$percentKey]) && is_numeric($t[$percentKey])) {
-      $pct = floatval($t[$percentKey]);
-    }
-    if ($pct !== null) {
-      if ($pct > 40) { $departmentMap[$dept]['red']++; }
-      else if ($pct > 10) { $departmentMap[$dept]['yellow']++; }
-      else { $departmentMap[$dept]['green']++; }
-    } else {
-      $k = $pkey . '_category';
-      $val = isset($t[$k]) && is_string($t[$k]) ? strtoupper($t[$k]) : '';
-      if ($val === '') continue;
-      if (startsWith($val, 'GREEN')) { $departmentMap[$dept]['green']++; }
-      else if (startsWith($val, 'YELLOW')) { $departmentMap[$dept]['yellow']++; }
-      else if (startsWith($val, 'RED')) { $departmentMap[$dept]['red']++; }
-    }
+    $pk = strtolower($period);
+    $z = zoneForTeacherPeriod($t, $pk);
+    if ($z) { $departmentMap[$dept][$z]++; }
   }
 }
 $departmentChart = array_values($departmentMap);
 
-header('Content-Type: application/json');
-echo json_encode([
-  'filters' => [ 'program' => $program, 'school_year' => $school_year, 'semester' => $semester, 'period' => $period ],
+$response = [
+  'filters' => [ 'program' => $program, 'program_id' => $programId, 'school_year' => $school_year, 'semester' => $semester, 'period' => $period ],
   'summary' => $summaryRows,
   'consistent_zone_counts' => $consistent,
   'department_chart' => $departmentChart,
-]);
+];
+
+if ($debug) {
+  // Attach lightweight debug info to help verification
+  $samples = [];
+  $limit = 5; $i = 0;
+  foreach ($teachers as $t) {
+    if ($i >= $limit) break;
+    $s = $teacherModel->aggregateStatsForTeacher(intval($t['id']), $school_year, $semester, $programId);
+    $samples[] = [
+      'teacher_id' => $t['teacher_id'] ?? $t['id'],
+      'name' => trim(($t['first_name'] ?? '') . ' ' . ($t['last_name'] ?? '')),
+      'enrolled' => $s['enrolled_students'],
+      'failed' => $s['failed_students'],
+      'percent' => $s['failure_percentage'],
+      'zone' => $s['zone'],
+    ];
+    $i++;
+  }
+  $response['debug'] = [
+    'program_id_resolved' => $programId,
+    'teachers_evaluated' => $totalTeachers,
+    'samples' => $samples,
+  ];
+}
+
+header('Content-Type: application/json');
+echo json_encode($response);

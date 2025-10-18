@@ -79,13 +79,13 @@ class TeacherModel {
             $data['failure_percentage'] ?? 0.00,
             $data['p1_failed'] ?? 0,
             $data['p1_percent'] ?? 0.00,
-            $data['p1_category'] ?? 'GREEN (0.01%-10%)',
+            $data['p1_category'] ?? 'GREEN (0%)',
             $data['p2_failed'] ?? 0,
             $data['p2_percent'] ?? 0.00,
-            $data['p2_category'] ?? 'GREEN (0.01%-10%)',
+            $data['p2_category'] ?? 'GREEN (0%)',
             $data['p3_failed'] ?? 0,
             $data['p3_percent'] ?? 0.00,
-            $data['p3_category'] ?? 'GREEN (0.01%-10%)',
+            $data['p3_category'] ?? 'GREEN (0%)',
         ]);
         return intval($this->pdo->lastInsertId());
     }
@@ -198,6 +198,60 @@ class TeacherModel {
         return $stmt->execute([$id]);
     }
 
+    /**
+     * Aggregate grade-based stats for a teacher with filters and exclusions.
+     * - Counts DISTINCT students to avoid overcount from multiple subjects
+     * - Excludes statuses: Dropped, Withdrawn from denominator
+     * - Filters by academic_year, semester, and program_id (via students.program_id)
+     */
+    public function aggregateStatsForTeacher(int $teacherId, ?string $schoolYear = null, ?string $semester = null, ?int $programId = null): array {
+        $sql = "
+            SELECT 
+                COUNT(DISTINCT g.student_id) AS total,
+                COUNT(DISTINCT CASE WHEN g.status = 'Failed' THEN g.student_id END) AS failed
+            FROM student_grades g
+            LEFT JOIN students s ON s.id = g.student_id
+            WHERE g.teacher_id = :tid
+              AND g.student_id IS NOT NULL
+              AND (g.status IS NULL OR g.status NOT IN ('Dropped','Withdrawn'))
+        ";
+        $params = ['tid' => $teacherId];
+        if ($schoolYear !== null && $schoolYear !== '') {
+            $sql .= " AND g.academic_year = :sy";
+            $params['sy'] = $schoolYear;
+        }
+        if ($semester !== null && $semester !== '') {
+            $sql .= " AND g.semester = :sem";
+            $params['sem'] = $semester;
+        }
+        if ($programId !== null && $programId > 0) {
+            $sql .= " AND s.program_id = :pid";
+            $params['pid'] = $programId;
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch() ?: ['total' => 0, 'failed' => 0];
+        $totalStudents = intval($row['total'] ?? 0);
+        $failedStudents = intval($row['failed'] ?? 0);
+        $failurePercentage = $totalStudents > 0 ? round(($failedStudents / $totalStudents) * 100, 2) : 0.00;
+        $category = $this->getPerformanceCategory($failurePercentage);
+        return [
+            'enrolled_students' => $totalStudents,
+            'failed_students' => $failedStudents,
+            'failure_percentage' => $failurePercentage,
+            'p1_failed' => $failedStudents,
+            'p1_percent' => $failurePercentage,
+            'p1_category' => $category,
+            'p2_failed' => $failedStudents,
+            'p2_percent' => $failurePercentage,
+            'p2_category' => $category,
+            'p3_failed' => $failedStudents,
+            'p3_percent' => $failurePercentage,
+            'p3_category' => $category,
+            'zone' => $this->getZoneFromPercent($failurePercentage),
+        ];
+    }
+
     public function calculateFailureStats(int $teacherId): array {
         // Count total and failed students for this teacher using teacher_id
         $stmt = $this->pdo->prepare('
@@ -246,13 +300,21 @@ class TeacherModel {
     }
 
     private function getPerformanceCategory(float $percentage): string {
-        if ($percentage > 40) {
-            return 'RED (Above 40%)';
-        } elseif ($percentage > 10) {
+        if ($percentage <= 0) {
+            return 'GREEN (0%)';
+        } elseif ($percentage <= 10) {
+            return 'GREEN (0.01%-10%)';
+        } elseif ($percentage <= 40) {
             return 'YELLOW (10.01%-40%)';
         } else {
-            return 'GREEN (0.01%-10%)';
+            return 'RED (40.01%-100%)';
         }
+    }
+
+    private function getZoneFromPercent(float $percentage): string {
+        if ($percentage <= 10) return 'green';
+        if ($percentage <= 40) return 'yellow';
+        return 'red';
     }
 
     public function updateFailureStats(int $teacherId): bool {

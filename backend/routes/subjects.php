@@ -1,19 +1,13 @@
 <?php
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+require_once __DIR__ . '/../api/headers.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+require_once __DIR__ . '/../config/connection.php';
+require_once __DIR__ . '/../models/Subject.php';
 
-require_once '../config/connection.php';
-require_once '../models/Subject.php';
+$db = new DatabaseConnection();
+$subject = new Subject($db->pdo());
 
-$subject = new Subject($conn);
-
-$method = $_SERVER['REQUEST_METHOD'];
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 switch ($method) {
     case 'GET':

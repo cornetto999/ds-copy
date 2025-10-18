@@ -118,7 +118,7 @@ const Teachers = () => {
 
   useEffect(() => {
     fetchTeachers();
-  }, []);
+  }, [academicYear, semester]);
 
   useEffect(() => {
     setVisibleColumns(prev => ({
@@ -167,10 +167,12 @@ const Teachers = () => {
   const fetchTeachers = async () => {
     try {
       setLoading(true);
-      const response = await fetch(apiUrl('teachers.php'));
+      const params = new URLSearchParams();
+      if (academicYear) params.set('school_year', academicYear);
+      if (semester) params.set('semester', semester);
+      params.set('recompute', '0');
+      const response = await fetch(apiUrl(`teachers.php?${params.toString()}`));
       const data = await response.json();
-      
-      // Ensure data is an array
       if (Array.isArray(data)) {
         setTeachers(data);
       } else {
@@ -384,10 +386,26 @@ const Teachers = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      toast({
+        title: "No file selected",
+        description: "Please choose a CSV file to upload.",
+        variant: "destructive"
+      });
+      return;
+    }
 
-    // Validate file type - only CSV supported
-    const allowedTypes = ['text/csv'];
+    if (file.size <= 0) {
+      toast({
+        title: "Empty file",
+        description: "The selected file appears to be empty (0 bytes).",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Validate file type - only CSV supported for typed import
+    const allowedTypes = ['text/csv', 'text/plain', 'application/csv', 'application/octet-stream'];
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
     if (fileExtension === 'xlsx' || fileExtension === 'xls') {
@@ -428,7 +446,7 @@ const Teachers = () => {
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', file); // must match PHP key
       formData.append('type', 'teachers');
 
       // Simulate progress
@@ -450,24 +468,29 @@ const Teachers = () => {
       clearInterval(progressInterval);
       setUploadProgress(100);
 
-      const result = await response.json();
+      let result: any = {};
+      try {
+        result = await response.json();
+      } catch (e) {
+        result = { success: false, message: 'Invalid JSON response from server' };
+      }
 
       if (response.ok && result.success) {
+        const extra = result.filename && result.filesize ? ` (saved as ${result.filename}, ${result.filesize} bytes)` : '';
         toast({
           title: "Upload successful",
-          description: result.message,
+          description: `${result.message}${extra}`,
         });
-        // Refresh the teachers list
         fetchTeachers();
       } else {
         // Handle Excel file error with instructions
-        if (result.instructions) {
+        if (Array.isArray(result.instructions)) {
           const instructionText = result.instructions.join('\n');
           toast({
             title: "Excel file not supported",
             description: (
               <div className="space-y-2">
-                <p>{result.error}</p>
+                <p>{result.message}</p>
                 <div className="text-sm">
                   <p className="font-medium">Instructions:</p>
                   <pre className="whitespace-pre-wrap text-xs">{instructionText}</pre>
@@ -478,10 +501,26 @@ const Teachers = () => {
             duration: 10000
           });
         } else {
+          const backendMessage = result?.message || 'Failed to upload file';
+          const errorList = Array.isArray(result?.errors)
+            ? result.errors.slice(0, 8).map((e: any) => typeof e === 'string' ? e : JSON.stringify(e))
+            : [];
+
           toast({
             title: "Upload failed",
-            description: result.error || "Failed to upload file",
-            variant: "destructive"
+            description: (
+              <div className="space-y-2">
+                <p>{backendMessage}</p>
+                {errorList.length > 0 && (
+                  <div className="text-sm">
+                    <p className="font-medium">Details:</p>
+                    <pre className="whitespace-pre-wrap text-xs">{errorList.join('\n')}</pre>
+                  </div>
+                )}
+              </div>
+            ),
+            variant: "destructive",
+            duration: errorList.length > 0 ? 12000 : 6000
           });
         }
       }
@@ -500,8 +539,8 @@ const Teachers = () => {
   const downloadTemplate = () => {
     let csvContent = "FacultyNo,FacultyName,EnrolledStudents,P1_Failed,P1_Percent,P1_Category,P2_Failed,P2_Percent,P2_Category";
     let sampleData = "14-007-F,ADORMIE CORRALES MACARIO,184,18,9.78,GREEN (0.01%-10%),,,\n" +
-      "24-219-F,ALEXIS VIADOR LAROSA,307,9,2.93,GREEN (0.01%-10%),,,\n" +
-      "24-077-F,AMBER ANN ACAYLAR,201,16,7.96,GREEN (0.01%-10%),,,";
+    "24-219-F,ALEXIS VIADOR LAROSA,307,9,2.93,GREEN (0.01%-10%),,,\n" +
+    "24-077-F,AMBER ANN ACAYLAR,201,16,7.96,GREEN (0.01%-10%),,,";
     
     // Add P3 only for 2nd semester
     if (semester === "2nd") {

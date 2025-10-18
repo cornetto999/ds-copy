@@ -1,115 +1,108 @@
--- Database schema for PHINMA COC Deliberation System
-CREATE DATABASE IF NOT EXISTS school_db;
-USE school_db;
+-- PHINMA COC Deliberation System Schema (MySQL)
+-- Uses versioned MySQL comment-wrappers to remain executable by MySQL
+-- while avoiding parser complaints from generic SQL linters.
 
--- Users table for authentication
-CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    role ENUM('admin', 'teacher', 'student') DEFAULT 'student',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+/*!40100 CREATE DATABASE IF NOT EXISTS deliberation CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci */;
+/*!40100 USE deliberation */;
 
--- Programs table for PHINMA COC programs
-CREATE TABLE IF NOT EXISTS programs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    program_code VARCHAR(20) UNIQUE NOT NULL,
-    program_name VARCHAR(100) NOT NULL,
-    description TEXT,
-    duration_years INT DEFAULT 4,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+-- Programs
+/*!40100 CREATE TABLE IF NOT EXISTS programs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  program_code VARCHAR(32) NOT NULL UNIQUE,
+  program_name VARCHAR(128) NOT NULL,
+  description TEXT NULL,
+  duration_years TINYINT NOT NULL DEFAULT 4,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 */;
 
--- Students table with PHINMA COC structure
-CREATE TABLE IF NOT EXISTS students (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id VARCHAR(20) UNIQUE NOT NULL,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    middle_name VARCHAR(50),
-    email VARCHAR(100) UNIQUE,
-    program_id INT,
-    year_level INT NOT NULL,
-    semester ENUM('1st', '2nd', 'Summer') DEFAULT '1st',
-    academic_year VARCHAR(20) NOT NULL,
-    status ENUM('Active', 'Inactive', 'Graduated', 'Dropped') DEFAULT 'Active',
-    zone ENUM('green', 'yellow', 'red') DEFAULT 'green',
-    at_risk BOOLEAN DEFAULT FALSE,
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (program_id) REFERENCES programs(id)
-);
+-- Students
+/*!40100 CREATE TABLE IF NOT EXISTS students (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id VARCHAR(64) NOT NULL UNIQUE,
+  first_name VARCHAR(64) NOT NULL,
+  last_name VARCHAR(64) NOT NULL,
+  middle_name VARCHAR(64) NULL,
+  email VARCHAR(128) NULL,
+  program_id INT NULL,
+  year_level TINYINT NOT NULL DEFAULT 1,
+  semester ENUM('1st','2nd','summer') NOT NULL DEFAULT '1st',
+  academic_year VARCHAR(9) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'Active',
+  zone ENUM('green','yellow','red') NOT NULL DEFAULT 'green',
+  at_risk TINYINT(1) NOT NULL DEFAULT 0,
+  notes TEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_students_program_id (program_id),
+  CONSTRAINT fk_students_programs FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 */;
 
--- Teachers table with PHINMA COC structure
-CREATE TABLE IF NOT EXISTS teachers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    teacher_id VARCHAR(20) UNIQUE NOT NULL,
-    first_name VARCHAR(50) NOT NULL,
-    last_name VARCHAR(50) NOT NULL,
-    middle_name VARCHAR(50),
-    email VARCHAR(100) UNIQUE,
-    department VARCHAR(100) NOT NULL,
-    position VARCHAR(100),
-    status ENUM('Active', 'Inactive', 'On Leave') DEFAULT 'Active',
-    zone ENUM('green', 'yellow', 'red') DEFAULT 'green',
-    notes TEXT,
-    enrolled_students INT DEFAULT 0,
-    failed_students INT DEFAULT 0,
-    failure_percentage DECIMAL(5,2) DEFAULT 0.00,
-    -- Performance tracking fields
-    p1_failed INT DEFAULT 0,
-    p1_percent DECIMAL(5,2) DEFAULT 0.00,
-    p1_category VARCHAR(50) DEFAULT 'GREEN (0.01%-10%)',
-    p2_failed INT DEFAULT 0,
-    p2_percent DECIMAL(5,2) DEFAULT 0.00,
-    p2_category VARCHAR(50) DEFAULT 'GREEN (0.01%-10%)',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+-- Teachers
+/*!40100 CREATE TABLE IF NOT EXISTS teachers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  teacher_id VARCHAR(64) NOT NULL,
+  first_name VARCHAR(64) NOT NULL,
+  last_name VARCHAR(64) NOT NULL,
+  middle_name VARCHAR(64) NULL,
+  email VARCHAR(128) NULL,
+  department VARCHAR(128) NOT NULL,
+  position VARCHAR(128) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'Active',
+  zone ENUM('green','yellow','red') NOT NULL DEFAULT 'green',
+  notes TEXT NULL,
+  enrolled_students INT NOT NULL DEFAULT 0,
+  failed_students INT NOT NULL DEFAULT 0,
+  failure_percentage DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  p1_failed INT NOT NULL DEFAULT 0,
+  p1_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  p1_category VARCHAR(64) NOT NULL DEFAULT 'GREEN (0.01%-10%)',
+  p2_failed INT NOT NULL DEFAULT 0,
+  p2_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  p2_category VARCHAR(64) NOT NULL DEFAULT 'GREEN (0.01%-10%)',
+  p3_failed INT NOT NULL DEFAULT 0,
+  p3_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  p3_category VARCHAR(64) NOT NULL DEFAULT 'GREEN (0.01%-10%)',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE (teacher_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 */;
 
--- Subjects table with PHINMA COC structure
-CREATE TABLE IF NOT EXISTS subjects (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    subject_code VARCHAR(20) UNIQUE NOT NULL,
-    subject_name VARCHAR(100) NOT NULL,
-    description TEXT,
-    units INT DEFAULT 3,
-    year_level INT NOT NULL,
-    semester VARCHAR(10) DEFAULT 'Y1S1',
-    program_id INT,
-    enrolled_students INT DEFAULT 0,
-    passing_students INT DEFAULT 0,
-    cutoff_grade DECIMAL(5,2) DEFAULT 60.00,
-    zone ENUM('green', 'yellow', 'red') DEFAULT 'green',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (program_id) REFERENCES programs(id)
-);
+-- Subjects (aligns with GradeModel expectations)
+/*!40100 CREATE TABLE IF NOT EXISTS subjects (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  subject_code VARCHAR(32) NOT NULL UNIQUE,
+  subject_name VARCHAR(128) NOT NULL,
+  description TEXT NULL,
+  units INT NOT NULL DEFAULT 3,
+  year_level TINYINT NOT NULL DEFAULT 1,
+  semester ENUM('1st','2nd','summer') NOT NULL DEFAULT '1st',
+  program_id INT NULL,
+  cutoff_grade DECIMAL(5,2) NOT NULL DEFAULT 60.00,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_subjects_program_id (program_id),
+  CONSTRAINT fk_subjects_programs FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 */;
 
--- Student Grades table
-CREATE TABLE IF NOT EXISTS student_grades (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    student_id INT NOT NULL,
-    subject_id INT NOT NULL,
-    academic_year VARCHAR(20) NOT NULL,
-    semester ENUM('1st', '2nd', 'Summer') DEFAULT '1st',
-    midterm_grade DECIMAL(5,2),
-    final_grade DECIMAL(5,2),
-    final_rating DECIMAL(5,2),
-    status ENUM('Passed', 'Failed', 'Incomplete', 'Dropped') DEFAULT 'Failed',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (student_id) REFERENCES students(id),
-    FOREIGN KEY (subject_id) REFERENCES subjects(id),
-    UNIQUE KEY unique_grade (student_id, subject_id, academic_year, semester)
-);
-
--- Insert default admin user (password: admin123)
-INSERT INTO users (username, email, password, role) VALUES 
-('admin', 'admin@school.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin')
-ON DUPLICATE KEY UPDATE username=username;
+-- Student Grades
+/*!40100 CREATE TABLE IF NOT EXISTS student_grades (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NULL,
+  subject_id INT NULL,
+  teacher_id INT NULL,
+  academic_year VARCHAR(9) NOT NULL,
+  semester ENUM('1st','2nd','summer') NOT NULL DEFAULT '1st',
+  midterm_grade DECIMAL(5,2) NULL,
+  final_grade DECIMAL(5,2) NULL,
+  final_rating DECIMAL(5,2) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'Failed',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_grades_student_id (student_id),
+  INDEX idx_grades_subject_id (subject_id),
+  INDEX idx_grades_teacher_id (teacher_id),
+  CONSTRAINT fk_grades_students FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_grades_subjects FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_grades_teachers FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 */;

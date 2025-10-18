@@ -64,10 +64,10 @@ const TeacherReports = () => {
       const e = Number(enrolled);
       const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
       if (pct !== null) {
-        if (pct === 0) return "green";
-        if (pct <= 10) return "green";
-        if (pct <= 40) return "yellow";
-        return "red";
+        const label = categoryFromPercentValue(pct);
+        if (label.startsWith('GREEN')) return 'green';
+        if (label.startsWith('YELLOW')) return 'yellow';
+        return 'red';
       }
       const cat = String(category || "").toUpperCase().trim();
       if (!cat) return null;
@@ -111,7 +111,8 @@ const TeacherReports = () => {
       else if (filters.period === 'P3') percent = p3;
       else percent = Math.max(p1, p2, p3);
       return { teacher: `${t.first_name} ${t.last_name}`, percent };
-    }).filter(r => r.percent > 0);
+    })
+    .filter(r => Number.isFinite(r.percent));
     rows.sort((a,b) => b.percent - a.percent);
     return rows.slice(0, 10);
   }, [teachers, filters.period]);
@@ -143,11 +144,13 @@ const TeacherReports = () => {
       setLoadingSummary(true);
       setErrorSummary(null);
       const params = new URLSearchParams({
-        program: filters.program || '',
         school_year: filters.schoolYear,
         semester: filters.semester,
         period: filters.period,
       });
+      if (filters.program) {
+        params.set('program_id', filters.program);
+      }
       const res = await fetch(apiUrl(`teacher_summary.php?${params.toString()}`));
       let data: any = {};
       try {
@@ -178,7 +181,15 @@ const TeacherReports = () => {
     const fetchTeachers = async () => {
       try {
         setLoading(true);
-        const response = await fetch(apiUrl('teachers.php'));
+        const tParams = new URLSearchParams({
+          recompute: '1',
+          school_year: filters.schoolYear,
+          semester: filters.semester,
+        });
+        if (filters.program) {
+          tParams.set('program_id', filters.program);
+        }
+        const response = await fetch(apiUrl(`teachers.php?${tParams.toString()}`));
         let data: any = [];
         try {
           const ct = response.headers.get('content-type') || '';
@@ -198,7 +209,7 @@ const TeacherReports = () => {
       }
     };
     fetchTeachers();
-  }, []);
+  }, [filters.program, filters.schoolYear, filters.semester]);
 
   const calcPercent = (failed?: number | string, enrolled?: number | string) => {
     const f = Number(failed);
@@ -219,7 +230,8 @@ const TeacherReports = () => {
     return null;
   };
 
-  const categoryFromPercentValue = (pct: number) => {
+  function categoryFromPercentValue(pct: number) {
+    if (!isFinite(pct)) return 'RED (40.01%-100%)';
     if (pct === 0) return 'GREEN (0%)';
     if (pct <= 10) return 'GREEN (0.01%-10%)';
     if (pct <= 40) return 'YELLOW (10.01%-40%)';
@@ -251,57 +263,26 @@ const TeacherReports = () => {
   }, [teachers, filters.period]);
 
   const categoryDistribution = useMemo(() => {
-    const counts = { green: 0, yellow: 0, red: 0 };
-    (teachers || []).forEach((t) => {
-      if (filters.period === 'All') {
-        let hasRed = false, hasYellow = false, hasGreen = false;
-        (['p1','p2','p3'] as const).forEach((pk) => {
-          const dbPercent = (t as any)[`${pk}_percent`];
-          const failed = (t as any)[`${pk}_failed`];
-          const pct = percentFromData(dbPercent, failed, t.enrolled_students);
-          if (pct !== null) {
-            const label = categoryFromPercentValue(pct);
-            if (label.startsWith('RED')) hasRed = true;
-            else if (label.startsWith('YELLOW')) hasYellow = true;
-            else if (label.startsWith('GREEN')) hasGreen = true;
-          } else {
-            const cat = String((t as any)[`${pk}_category`] || '').toUpperCase().trim();
-            if (cat.length === 0) return;
-            if (cat.startsWith('RED')) hasRed = true;
-            else if (cat.startsWith('YELLOW')) hasYellow = true;
-            else if (cat.startsWith('GREEN')) hasGreen = true;
-          }
-        });
-        if (!hasRed && !hasYellow && !hasGreen) return;
-        if (hasRed) counts.red += 1;
-        else if (hasYellow) counts.yellow += 1;
-        else if (hasGreen) counts.green += 1;
-      } else {
-        const pk = filters.period.toLowerCase();
-        const dbPercent = (t as any)[`${pk}_percent`];
-        const failed = (t as any)[`${pk}_failed`];
-        const pct = percentFromData(dbPercent, failed, t.enrolled_students);
-        let bucket: Zone | null = null;
-        if (pct !== null) {
-          const label = categoryFromPercentValue(pct);
-          if (label.startsWith('GREEN')) bucket = 'green';
-          else if (label.startsWith('YELLOW')) bucket = 'yellow';
-          else bucket = 'red';
-        } else {
-          const cat = String((t as any)[`${pk}_category`] || '').toUpperCase();
-          if (cat.startsWith('GREEN')) bucket = 'green';
-          else if (cat.startsWith('YELLOW')) bucket = 'yellow';
-          else if (cat.startsWith('RED')) bucket = 'red';
-        }
-        if (bucket) counts[bucket] += 1;
-      }
-    });
+    if (filters.period === 'All') {
+      const green = Number(consistentCounts.green || 0);
+      const yellow = Number(consistentCounts.yellow || 0);
+      const red = Number(consistentCounts.red || 0);
+      return [
+        { name: 'GREEN', value: green },
+        { name: 'YELLOW', value: yellow },
+        { name: 'RED', value: red },
+      ];
+    }
+    const match = (summary || []).find((row) => row.period === filters.period);
+    const green = Number(match?.green_count || 0);
+    const yellow = Number(match?.yellow_count || 0);
+    const red = Number(match?.red_count || 0);
     return [
-      { name: 'GREEN', value: counts.green },
-      { name: 'YELLOW', value: counts.yellow },
-      { name: 'RED', value: counts.red },
+      { name: 'GREEN', value: green },
+      { name: 'YELLOW', value: yellow },
+      { name: 'RED', value: red },
     ];
-  }, [teachers, filters.period]);
+  }, [summary, filters.period, consistentCounts]);
 
   const percentChartConfig = {
     percent: { label: "% Failed" },
@@ -349,10 +330,10 @@ const TeacherReports = () => {
       const e = Number(enrolled);
       const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
       if (pct !== null) {
-        if (pct === 0) return "green";
-        if (pct <= 10) return "green";
-        if (pct <= 40) return "yellow";
-        return "red";
+        const label = categoryFromPercentValue(pct);
+        if (label.startsWith('GREEN')) return 'green';
+        if (label.startsWith('YELLOW')) return 'yellow';
+        return 'red';
       }
       const cat = String(category || "").toUpperCase().trim();
       if (!cat) return null;
@@ -427,10 +408,10 @@ const TeacherReports = () => {
       const e = Number(enrolled);
       const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
       if (pct !== null) {
-        if (pct === 0) return "green";
-        if (pct <= 10) return "green";
-        if (pct <= 40) return "yellow";
-        return "red";
+        const label = categoryFromPercentValue(pct);
+        if (label.startsWith('GREEN')) return 'green';
+        if (label.startsWith('YELLOW')) return 'yellow';
+        return 'red';
       }
       const cat = String(category || "").toUpperCase().trim();
       if (!cat) return null;
@@ -560,7 +541,7 @@ const TeacherReports = () => {
               <SelectContent>
                 <SelectItem value="__ALL__">All</SelectItem>
                 {programs.map((p) => (
-                  <SelectItem key={p.id} value={p.program_name}>{p.program_name}</SelectItem>
+                  <SelectItem key={p.id} value={String(p.id)}>{p.program_name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -626,7 +607,7 @@ const TeacherReports = () => {
                 <SelectContent>
                   <SelectItem value="__ALL__">All</SelectItem>
                   {programs.map((p) => (
-                    <SelectItem key={p.id} value={p.program_name}>{p.program_name}</SelectItem>
+                    <SelectItem key={p.id} value={String(p.id)}>{p.program_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -738,36 +719,37 @@ const TeacherReports = () => {
                     <TableRow>
                       <TableHead>Teacher</TableHead>
                       <TableHead>Department</TableHead>
+                      <TableHead>Enrolled</TableHead>
+                      <TableHead>Failed</TableHead>
                       <TableHead>Failure %</TableHead>
                       <TableHead>Category</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {zoneTeachers.length === 0 && (
-                      <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No teachers found</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No teachers found</TableCell></TableRow>
                     )}
                     {zoneTeachers.map((t, i) => {
-                      const perc = (() => {
-                        const toNum = (x: any) => typeof x === 'number' ? x : parseFloat(x || '0');
-                        const p1 = toNum(t.p1_percent);
-                        const p2 = toNum(t.p2_percent);
-                        const p3 = toNum((t as any).p3_percent);
-                        if (filters.period === 'P1') return p1;
-                        if (filters.period === 'P2') return p2;
-                        if (filters.period === 'P3') return p3;
-                        return Math.max(p1, p2, p3);
+                      const enrolled = Number(t.enrolled_students) || 0;
+                      const computePctFor = (pk: 'p1' | 'p2' | 'p3') => percentFromData((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], enrolled);
+                      const pkSelected: 'p1' | 'p2' | 'p3' = (() => {
+                        if (filters.period === 'All') {
+                          const candidates: Array<{ pk: 'p1'|'p2'|'p3'; pct: number }> = (['p1','p2','p3'] as const).map((pk) => ({ pk, pct: computePctFor(pk) ?? 0 }));
+                          candidates.sort((a,b) => b.pct - a.pct);
+                          return candidates[0].pk;
+                        }
+                        return filters.period.toLowerCase() as 'p1'|'p2'|'p3';
                       })();
-                      const cat = (() => {
-                        if (filters.period === 'P1') return t.p1_category;
-                        if (filters.period === 'P2') return t.p2_category;
-                        if (filters.period === 'P3') return (t as any).p3_category;
-                        return t.p1_category || t.p2_category || (t as any).p3_category;
-                      })();
+                      const failed = Number((t as any)[`${pkSelected}_failed`]) || 0;
+                      const percent = computePctFor(pkSelected);
+                      const cat = (percent !== null && percent !== undefined) ? categoryFromPercentValue(percent) : String((t as any)[`${pkSelected}_category`] || '').trim();
                       return (
                         <TableRow key={i}>
                           <TableCell>{t.first_name} {t.last_name}</TableCell>
                           <TableCell>{t.department}</TableCell>
-                          <TableCell>{typeof perc === 'number' ? `${perc.toFixed(2)}%` : '—'}</TableCell>
+                          <TableCell>{enrolled}</TableCell>
+                          <TableCell>{failed}</TableCell>
+                          <TableCell>{typeof percent === 'number' && isFinite(percent) ? `${percent.toFixed(2)}%` : '—'}</TableCell>
                           <TableCell>{cat || '—'}</TableCell>
                         </TableRow>
                       );
@@ -826,19 +808,18 @@ const TeacherReports = () => {
         <Card>
           <CardHeader>
             <CardTitle>Total Enrolled vs Failed ({filters.period})</CardTitle>
-            <CardDescription>GREEN vs YELLOW vs RED — one bar each</CardDescription>
+            <CardDescription>Enrolled vs Failed totals</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={zoneTotalsFailedChartConfig}>
-              <BarChart data={totalsZoneFailedData}>
+            <ChartContainer config={totalsChartConfig}>
+              <BarChart data={totalsData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 <ChartLegend content={<ChartLegendContent />} />
-                <Bar dataKey="green" fill="var(--color-green)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="yellow" fill="var(--color-yellow)" />
-                <Bar dataKey="red" fill="var(--color-red)" />
+                <Bar dataKey="enrolled" fill="var(--color-enrolled)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="failed" fill="var(--color-failed)" />
               </BarChart>
             </ChartContainer>
           </CardContent>
