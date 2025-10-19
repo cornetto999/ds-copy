@@ -268,12 +268,8 @@ const Subjects = () => {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "subject_code,subject_name,description,units,year_level,semester,program,cutoff\n" +
-      "CS101,Introduction to Programming,Basic programming concepts,3,1,Y1S1,BSIT,60\n" +
-      "CS102,Data Structures,Data structures and algorithms,3,1,Y1S2,BSIT,60\n" +
-      "MATH101,Calculus I,Basic calculus,3,1,Y1S1,BSIT,60";
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const header = "subject_code,subject_name,description,units,year_level,semester,program,cutoff";
+    const blob = new Blob([header + "\n"], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

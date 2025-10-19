@@ -225,11 +225,8 @@ const Programs = () => {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "program_code,program_name,description,duration_years\n" +
-      "BSCS,Bachelor of Science in Computer Science,4-year computer science program,4\n" +
-      "BSIT,Bachelor of Science in Information Technology,4-year IT program,4";
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const header = "program_code,program_name,description,duration_years";
+    const blob = new Blob([header + "\n"], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

@@ -290,11 +290,8 @@ const Students = () => {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "student_id,first_name,last_name,email,program,year_level,status,gpa,at_risk,notes,grade_level\n" +
-      "2024-BSIT-001,John,Doe,john.doe@example.com,BSIT,1st Year,active,3.5,0,Sample student,1\n" +
-      "2024-BSIT-002,Jane,Smith,jane.smith@example.com,BSIT,2nd Year,active,3.2,1,At risk student,2";
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const header = "student_id,first_name,last_name,email,program,year_level,status,gpa,at_risk,notes,grade_level";
+    const blob = new Blob([header + "\n"], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

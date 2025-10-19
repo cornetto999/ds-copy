@@ -3,15 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "@/lib/api";
 import { Loader2, BarChart3 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Zone = "green" | "yellow" | "red";
 
@@ -31,7 +27,6 @@ interface Teacher {
 const TeacherReports = () => {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<"P1" | "P2" | "P3">("P1");
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
@@ -45,54 +40,37 @@ const TeacherReports = () => {
   });
   const [summary, setSummary] = useState<{ period: string; total_teachers: number | null; green_count: number | null; green_percent: number | null; yellow_count: number | null; yellow_percent: number | null; red_count: number | null; red_percent: number | null }[]>([]);
   const [consistentCounts, setConsistentCounts] = useState<{ green: number; yellow: number; red: number }>({ green: 0, yellow: 0, red: 0 });
-  const [deptChart, setDeptChart] = useState<{ department: string; period: string; green: number; yellow: number; red: number }[]>([]);
-  const [loadingSummary, setLoadingSummary] = useState(false);
-  const [errorSummary, setErrorSummary] = useState<string | null>(null);
 
-  // Zone modal state
-  const [zoneModalOpen, setZoneModalOpen] = useState(false);
-  const [zoneModalZone, setZoneModalZone] = useState<Zone | null>(null);
+  // New: interactive active zone for department line chart
+  // New: hover state for department interactive line chart
+  const [activeDeptHover, setActiveDeptHover] = useState<Zone | null>(null);
 
-  // Compute teachers for selected zone and period
-  const zoneTeachers = useMemo(() => {
-    if (!zoneModalZone) return [] as Teacher[];
-    const targetZone = zoneModalZone;
+  // New: active zone hover for periods chart
+  const [activeZoneHover, setActiveZoneHover] = useState<Zone | null>(null);
 
-    const getZoneFromValues = (percent?: number | string, failed?: number | string, enrolled?: number | string, category?: string): Zone | null => {
-      const p = Number(percent);
-      const f = Number(failed);
-      const e = Number(enrolled);
-      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
-      if (pct !== null) {
-        const label = categoryFromPercentValue(pct);
-        if (label.startsWith('GREEN')) return 'green';
-        if (label.startsWith('YELLOW')) return 'yellow';
-        return 'red';
-      }
-      const cat = String(category || "").toUpperCase().trim();
-      if (!cat) return null;
-      if (cat.startsWith("RED")) return "red";
-      if (cat.startsWith("YELLOW")) return "yellow";
-      if (cat.startsWith("GREEN")) return "green";
-      return null;
-    };
+  // Build line data across periods from summary
+  const zonePeriodsLineData = useMemo(() => {
+    const rows = (summary || []).filter((r) => r.period && r.period !== 'SEMESTRAL');
+    return rows.map((r) => ({
+      period: r.period,
+      green: Number(r.green_count || 0),
+      yellow: Number(r.yellow_count || 0),
+      red: Number(r.red_count || 0),
+    }));
+  }, [summary]);
 
-    return (teachers || []).filter((t) => {
-      if (filters.period === "All") {
-        const zones: Zone[] = [];
-        (['p1','p2','p3'] as const).forEach((pk) => {
-          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-          if (z) zones.push(z);
-        });
-        // Worst-case zone presence: RED > YELLOW > GREEN
-        const worst: Zone | null = zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
-        return worst === targetZone;
-      }
-      const pk = filters.period.toLowerCase();
-      const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-      return z === targetZone;
-    });
-  }, [teachers, filters.period, zoneModalZone]);
+  // Monthly department zone counts (current year up to current month)
+  const [deptMonthlyCounts, setDeptMonthlyCounts] = useState<{
+    month_num: number;
+    month_label: string;
+    green: number;
+    yellow: number;
+    red: number;
+    top_departments: { green: string | null; yellow: string | null; red: string | null };
+  }[]>([]);
+
+  // Colors for monthly department chart (as requested)
+  const ZONE_COLORS = { green: "#16a34a", yellow: "#facc15", red: "#dc2626" } as const;
 
   // Top 10 failure percent based on selected period
   const top10Data = useMemo(() => {
@@ -141,8 +119,7 @@ const TeacherReports = () => {
 
   const generateReport = async () => {
     try {
-      setLoadingSummary(true);
-      setErrorSummary(null);
+
       const params = new URLSearchParams({
         school_year: filters.schoolYear,
         semester: filters.semester,
@@ -163,12 +140,39 @@ const TeacherReports = () => {
       }
       setSummary(Array.isArray(data.summary) ? data.summary : []);
       setConsistentCounts(data.consistent_zone_counts || { green: 0, yellow: 0, red: 0 });
-      setDeptChart(Array.isArray(data.department_chart) ? data.department_chart : []);
     } catch (e: any) {
       console.error('Failed to generate report:', e);
-      setErrorSummary('Failed to generate report');
+
     } finally {
-      setLoadingSummary(false);
+
+    }
+  };
+
+  // Fetch monthly department summary (current year up to current month)
+  const fetchMonthlyDeptSummary = async () => {
+    try {
+      const params = new URLSearchParams({
+        school_year: filters.schoolYear,
+        semester: filters.semester,
+      });
+      if (filters.program) {
+        params.set('program_id', filters.program);
+      }
+      const res = await fetch(apiUrl(`teacher_monthly_department_summary.php?${params.toString()}`));
+      let payload: any = {};
+      try {
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          payload = await res.json();
+        }
+      } catch (_) {
+        payload = {};
+      }
+      const monthly = Array.isArray(payload.monthly_zone_counts) ? payload.monthly_zone_counts : [];
+      setDeptMonthlyCounts(monthly);
+    } catch (err) {
+      console.error('Failed to fetch monthly department summary', err);
+      setDeptMonthlyCounts([]);
     }
   };
 
@@ -176,6 +180,11 @@ const TeacherReports = () => {
     // Auto-update on filter change to meet dynamic update requirement
     generateReport();
   }, [filters.program, filters.schoolYear, filters.semester, filters.period]);
+
+  useEffect(() => {
+    // Update monthly chart whenever program/year/semester changes
+    fetchMonthlyDeptSummary();
+  }, [filters.program, filters.schoolYear, filters.semester]);
   // Ensure teachers load via effect; remove stray top-level call
   useEffect(() => {
     const fetchTeachers = async () => {
@@ -211,32 +220,7 @@ const TeacherReports = () => {
     fetchTeachers();
   }, [filters.program, filters.schoolYear, filters.semester]);
 
-  const calcPercent = (failed?: number | string, enrolled?: number | string) => {
-    const f = Number(failed);
-    const e = Number(enrolled);
-    if (!isFinite(f) || !isFinite(e) || e <= 0) return null;
-    return (f / e) * 100;
-  };
 
-  const percentFromData = (
-    dbPercent?: number | string,
-    failed?: number | string,
-    enrolled?: number | string
-  ) => {
-    const direct = Number(dbPercent);
-    const calc = calcPercent(failed, enrolled);
-    if (calc !== null) return calc;
-    if (isFinite(direct)) return direct;
-    return null;
-  };
-
-  function categoryFromPercentValue(pct: number) {
-    if (!isFinite(pct)) return 'RED (40.01%-100%)';
-    if (pct === 0) return 'GREEN (0%)';
-    if (pct <= 10) return 'GREEN (0.01%-10%)';
-    if (pct <= 40) return 'YELLOW (10.01%-40%)';
-    return 'RED (40.01%-100%)';
-  };
 
   // Period-aware keys using filters.period (supports All)
   const totalsData = useMemo(() => {
@@ -299,167 +283,9 @@ const TeacherReports = () => {
     return COLOR_RED;
   };
 
-  // Compute stacked totals by zone for Enrolled and Failed
-  const stackedTotalsChartConfig = {
-    enrolled_green: { label: "Enrolled GREEN", color: "#22c55e" }, // green-500
-    enrolled_yellow: { label: "Enrolled YELLOW", color: "#facc15" }, // yellow-400
-    enrolled_red: { label: "Enrolled RED", color: "#ef4444" }, // red-500
-    failed_green: { label: "Failed GREEN", color: "#16a34a" }, // green-600 (distinct)
-    failed_yellow: { label: "Failed YELLOW", color: "#ca8a04" }, // yellow-600 (distinct)
-    failed_red: { label: "Failed RED", color: "#b91c1c" }, // red-700 (distinct)
-  };
 
-  const totalsStackedData = useMemo(() => {
-    const buckets: Record<string, number> = {
-      enrolled_green: 0,
-      enrolled_yellow: 0,
-      enrolled_red: 0,
-      failed_green: 0,
-      failed_yellow: 0,
-      failed_red: 0,
-    };
 
-    const getZoneFromValues = (
-      percent?: number | string,
-      failed?: number | string,
-      enrolled?: number | string,
-      category?: string
-    ): Zone | null => {
-      const p = Number(percent);
-      const f = Number(failed);
-      const e = Number(enrolled);
-      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
-      if (pct !== null) {
-        const label = categoryFromPercentValue(pct);
-        if (label.startsWith('GREEN')) return 'green';
-        if (label.startsWith('YELLOW')) return 'yellow';
-        return 'red';
-      }
-      const cat = String(category || "").toUpperCase().trim();
-      if (!cat) return null;
-      if (cat.startsWith("RED")) return "red";
-      if (cat.startsWith("YELLOW")) return "yellow";
-      if (cat.startsWith("GREEN")) return "green";
-      return null;
-    };
 
-    const getZoneForTeacher = (t: Teacher): Zone | null => {
-      if (filters.period === "All") {
-        const zones: Zone[] = [];
-        (['p1','p2','p3'] as const).forEach((pk) => {
-          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-          if (z) zones.push(z);
-        });
-        const worst: Zone | null = zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
-        return worst;
-      }
-      const pk = filters.period.toLowerCase();
-      return getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-    };
-
-    (teachers || []).forEach((t) => {
-      const z = getZoneForTeacher(t);
-      if (!z) return;
-
-      const enrolled = Number(t.enrolled_students) || 0;
-      buckets[`enrolled_${z}`] += enrolled;
-
-      let failed = 0;
-      if (filters.period === "All") {
-        const overallFailedRaw = (t as any).failed_students;
-        const overallFailed = Number(overallFailedRaw);
-        if (isFinite(overallFailed) && overallFailed > 0) {
-          failed = overallFailed;
-        } else {
-          const f1 = Number((t as any).p1_failed) || 0;
-          const f2 = Number((t as any).p2_failed) || 0;
-          const f3 = Number((t as any).p3_failed) || 0;
-          failed = Math.max(f1, f2, f3);
-        }
-      } else {
-        const key = `${filters.period.toLowerCase()}_failed` as const;
-        failed = Number((t as any)[key]) || 0;
-      }
-      buckets[`failed_${z}`] += failed;
-    });
-
-    return [{ label: `Totals ${filters.period}`, ...buckets }];
-  }, [teachers, filters.period]);
-
-  // Simple 3-series config for zone totals (one bar per color)
-  const zoneTotalsFailedChartConfig = {
-    green: { label: "GREEN", color: COLOR_GREEN },
-    yellow: { label: "YELLOW", color: COLOR_YELLOW },
-    red: { label: "RED", color: COLOR_RED },
-  };
-
-  // Compute totals of FAILED by zone (one bar per color)
-  const totalsZoneFailedData = useMemo(() => {
-    const buckets: Record<Zone, number> = { green: 0, yellow: 0, red: 0 } as const as Record<Zone, number>;
-
-    const getZoneFromValues = (
-      percent?: number | string,
-      failed?: number | string,
-      enrolled?: number | string,
-      category?: string
-    ): Zone | null => {
-      const p = Number(percent);
-      const f = Number(failed);
-      const e = Number(enrolled);
-      const pct = isFinite(p) ? p : (isFinite(f) && isFinite(e) && e > 0 ? (f / e) * 100 : null);
-      if (pct !== null) {
-        const label = categoryFromPercentValue(pct);
-        if (label.startsWith('GREEN')) return 'green';
-        if (label.startsWith('YELLOW')) return 'yellow';
-        return 'red';
-      }
-      const cat = String(category || "").toUpperCase().trim();
-      if (!cat) return null;
-      if (cat.startsWith("RED")) return "red";
-      if (cat.startsWith("YELLOW")) return "yellow";
-      if (cat.startsWith("GREEN")) return "green";
-      return null;
-    };
-
-    const getZoneForTeacherLocal = (t: Teacher): Zone | null => {
-      if (filters.period === "All") {
-        const zones: Zone[] = [];
-        (['p1','p2','p3'] as const).forEach((pk) => {
-          const z = getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-          if (z) zones.push(z);
-        });
-        return zones.includes("red") ? "red" : zones.includes("yellow") ? "yellow" : zones.includes("green") ? "green" : null;
-      }
-      const pk = filters.period.toLowerCase();
-      return getZoneFromValues((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], t.enrolled_students, (t as any)[`${pk}_category`]);
-    };
-
-    (teachers || []).forEach((t) => {
-      const z = getZoneForTeacherLocal(t);
-      if (!z) return;
-
-      let failed = 0;
-      if (filters.period === "All") {
-        const overallFailedRaw = (t as any).failed_students;
-        const overallFailed = Number(overallFailedRaw);
-        if (isFinite(overallFailed) && overallFailed > 0) {
-          failed = overallFailed;
-        } else {
-          const f1 = Number((t as any).p1_failed) || 0;
-          const f2 = Number((t as any).p2_failed) || 0;
-          const f3 = Number((t as any).p3_failed) || 0;
-          failed = Math.max(f1, f2, f3);
-        }
-      } else {
-        const key = `${filters.period.toLowerCase()}_failed` as const;
-        failed = Number((t as any)[key]) || 0;
-      }
-
-      buckets[z] += failed;
-    });
-
-    return [{ label: `Totals ${filters.period}`, ...buckets }];
-  }, [teachers, filters.period]);
   // Compute aggregated failed percent for totals chart
   const totalsPercent = useMemo(() => {
     const row = (totalsData && totalsData[0]) ? totalsData[0] : null;
@@ -589,200 +415,86 @@ const TeacherReports = () => {
         </CardContent>
       </Card>
 
-      {/* Charts moved below Department Distribution */}
-
-      {/* New summary report section above existing charts */}
+      {/* Department Chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Teacher Summary Level Report</CardTitle>
-          <CardDescription>Aggregated counts by zone per period; updates with filters</CardDescription>
+          <CardTitle>Zone Distribution by Department (All)</CardTitle>
+          <CardDescription>Monthly counts per zone across departments</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Filters Row */}
-          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-            <div>
-              <Label className="text-sm">Program</Label>
-              <Select value={filters.program} onValueChange={(v) => setFilters((f) => ({ ...f, program: v === '__ALL__' ? '' : v }))}>
-                <SelectTrigger className="h-8 w-full text-sm"><SelectValue placeholder="All programs" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__ALL__">All</SelectItem>
-                  {programs.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.program_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-sm">School Year</Label>
-              <Input className="h-8 w-full text-sm" value={filters.schoolYear} onChange={(e) => setFilters((f) => ({ ...f, schoolYear: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="text-sm">Semester</Label>
-              <Select value={filters.semester} onValueChange={(v) => setFilters((f) => ({ ...f, semester: v }))}>
-                <SelectTrigger className="h-8 w-full text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1st">1st</SelectItem>
-                  <SelectItem value="2nd">2nd</SelectItem>
-                  <SelectItem value="Summer">Summer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-sm">Period</Label>
-              <Select value={filters.period} onValueChange={(v) => setFilters((f) => ({ ...f, period: v as any }))}>
-                <SelectTrigger className="h-8 w-full text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="All">All</SelectItem>
-                  <SelectItem value="P1">P1</SelectItem>
-                  <SelectItem value="P2">P2</SelectItem>
-                  <SelectItem value="P3">P3</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {errorSummary && (
-            <div className="rounded-md bg-red-50 text-red-600 text-sm p-2">{errorSummary}</div>
-          )}
-
-          {/* Summary table */}
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Period</TableHead>
-                  <TableHead>Total Teachers</TableHead>
-                  <TableHead>Under Green</TableHead>
-                  <TableHead>% Green</TableHead>
-                  <TableHead>Under Yellow</TableHead>
-                  <TableHead>% Yellow</TableHead>
-                  <TableHead>Under Red</TableHead>
-                  <TableHead>% Red</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(summary || []).filter((row) => row.period !== 'SEMESTRAL').map((row) => (
-                  <TableRow key={row.period}>
-                    <TableCell>{row.period}</TableCell>
-                    <TableCell>{row.total_teachers ?? '—'}</TableCell>
-                    <TableCell>{row.green_count ?? '—'}</TableCell>
-                    <TableCell>{typeof row.green_percent === 'number' ? `${row.green_percent.toFixed(2)}%` : '—'}</TableCell>
-                    <TableCell>{row.yellow_count ?? '—'}</TableCell>
-                    <TableCell>{typeof row.yellow_percent === 'number' ? `${row.yellow_percent.toFixed(2)}%` : '—'}</TableCell>
-                    <TableCell>{row.red_count ?? '—'}</TableCell>
-                    <TableCell>{typeof row.red_percent === 'number' ? `${row.red_percent.toFixed(2)}%` : '—'}</TableCell>
-                  </TableRow>
-                ))}
-                {summary.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">No records found</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Consistent teachers cards */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card onClick={() => { setZoneModalZone('green'); setZoneModalOpen(true); }} className="cursor-pointer">
-              <CardContent className="p-4 text-center">
-                <div className="text-sm text-muted-foreground">Consistent Green</div>
-                <div className="text-2xl font-bold text-green-600">{consistentCounts.green}</div>
-                <div className="text-xs text-muted-foreground">{totalTeachersSelected > 0 ? `${((consistentCounts.green / totalTeachersSelected) * 100).toFixed(2)}%` : '—'}</div>
-              </CardContent>
-            </Card>
-            <Card onClick={() => { setZoneModalZone('yellow'); setZoneModalOpen(true); }} className="cursor-pointer">
-              <CardContent className="p-4 text-center">
-                <div className="text-sm text-muted-foreground">Consistent Yellow</div>
-                <div className="text-2xl font-bold text-yellow-500">{consistentCounts.yellow}</div>
-                <div className="text-xs text-muted-foreground">{totalTeachersSelected > 0 ? `${((consistentCounts.yellow / totalTeachersSelected) * 100).toFixed(2)}%` : '—'}</div>
-              </CardContent>
-            </Card>
-            <Card onClick={() => { setZoneModalZone('red'); setZoneModalOpen(true); }} className="cursor-pointer">
-              <CardContent className="p-4 text-center">
-                <div className="text-sm text-muted-foreground">Consistent Red</div>
-                <div className="text-2xl font-bold text-red-600">{consistentCounts.red}</div>
-                <div className="text-xs text-muted-foreground">{totalTeachersSelected > 0 ? `${((consistentCounts.red / totalTeachersSelected) * 100).toFixed(2)}%` : '—'}</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Zone modal */}
-          <Dialog open={zoneModalOpen} onOpenChange={setZoneModalOpen}>
-            <DialogContent className="sm:max-w-xl">
-              <DialogHeader>
-                <DialogTitle>{zoneModalZone ? `${zoneModalZone[0].toUpperCase()}${zoneModalZone.slice(1)} Zone Teachers (${filters.period})` : 'Zone'}</DialogTitle>
-              </DialogHeader>
-              <div className="max-h-[60vh] overflow-y-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Teacher</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Enrolled</TableHead>
-                      <TableHead>Failed</TableHead>
-                      <TableHead>Failure %</TableHead>
-                      <TableHead>Category</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {zoneTeachers.length === 0 && (
-                      <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No teachers found</TableCell></TableRow>
-                    )}
-                    {zoneTeachers.map((t, i) => {
-                      const enrolled = Number(t.enrolled_students) || 0;
-                      const computePctFor = (pk: 'p1' | 'p2' | 'p3') => percentFromData((t as any)[`${pk}_percent`], (t as any)[`${pk}_failed`], enrolled);
-                      const pkSelected: 'p1' | 'p2' | 'p3' = (() => {
-                        if (filters.period === 'All') {
-                          const candidates: Array<{ pk: 'p1'|'p2'|'p3'; pct: number }> = (['p1','p2','p3'] as const).map((pk) => ({ pk, pct: computePctFor(pk) ?? 0 }));
-                          candidates.sort((a,b) => b.pct - a.pct);
-                          return candidates[0].pk;
-                        }
-                        return filters.period.toLowerCase() as 'p1'|'p2'|'p3';
-                      })();
-                      const failed = Number((t as any)[`${pkSelected}_failed`]) || 0;
-                      const percent = computePctFor(pkSelected);
-                      const cat = (percent !== null && percent !== undefined) ? categoryFromPercentValue(percent) : String((t as any)[`${pkSelected}_category`] || '').trim();
+        <CardContent>
+          <ChartContainer
+            config={{
+              green: { label: "Green", color: ZONE_COLORS.green },
+              yellow: { label: "Yellow", color: ZONE_COLORS.yellow },
+              red: { label: "Red", color: ZONE_COLORS.red },
+            }}
+          >
+            <LineChart data={deptMonthlyCounts}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month_label" />
+              <YAxis allowDecimals={false} />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    indicator="line"
+                    labelFormatter={(value) => `Month: ${value}`}
+                    formatter={(value, name, item: any, _index, dataPayload: any) => {
+                      const zoneKey = String(item?.dataKey || name || "").toLowerCase();
+                      const deptName = dataPayload?.top_departments?.[zoneKey] ?? null;
                       return (
-                        <TableRow key={i}>
-                          <TableCell>{t.first_name} {t.last_name}</TableCell>
-                          <TableCell>{t.department}</TableCell>
-                          <TableCell>{enrolled}</TableCell>
-                          <TableCell>{failed}</TableCell>
-                          <TableCell>{typeof percent === 'number' && isFinite(percent) ? `${percent.toFixed(2)}%` : '—'}</TableCell>
-                          <TableCell>{cat || '—'}</TableCell>
-                        </TableRow>
+                        <div className="flex flex-1 justify-between items-center leading-none">
+                          <div className="grid gap-0.5">
+                            <span className="text-muted-foreground">{name}</span>
+                            <span className="text-muted-foreground">Dept: {deptName || "—"}</span>
+                          </div>
+                          <span className="font-mono font-medium tabular-nums text-foreground">{Number(value).toLocaleString()}</span>
+                        </div>
                       );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </DialogContent>
-          </Dialog>
+                    }}
+                  />
+                }
+              />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Line
+                type="monotone"
+                dataKey="green"
+                name="Green"
+                stroke="var(--color-green)"
+                strokeWidth={activeDeptHover === "green" ? 3 : 2}
+                strokeOpacity={activeDeptHover && activeDeptHover !== "green" ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveDeptHover("green")}
+                onMouseOut={() => setActiveDeptHover(null)}
+              />
+              <Line
+                type="monotone"
+                dataKey="yellow"
+                name="Yellow"
+                stroke="var(--color-yellow)"
+                strokeWidth={activeDeptHover === "yellow" ? 3 : 2}
+                strokeOpacity={activeDeptHover && activeDeptHover !== "yellow" ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveDeptHover("yellow")}
+                onMouseOut={() => setActiveDeptHover(null)}
+              />
+              <Line
+                type="monotone"
+                dataKey="red"
+                name="Red"
+                stroke="var(--color-red)"
+                strokeWidth={activeDeptHover === "red" ? 3 : 2}
+                strokeOpacity={activeDeptHover && activeDeptHover !== "red" ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveDeptHover("red")}
+                onMouseOut={() => setActiveDeptHover(null)}
+              />
+            </LineChart>
+          </ChartContainer>
         </CardContent>
       </Card>
-
-        {/* Department Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Zone Distribution by Department ({filters.period})</CardTitle>
-            <CardDescription>GREEN vs YELLOW vs RED per department</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={{ green: { label: 'GREEN' }, yellow: { label: 'YELLOW' }, red: { label: 'RED' } }}>
-              <BarChart data={deptChart}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="department" />
-                <YAxis />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Bar dataKey="green" fill="#22c55e" stackId="zones" radius={[4,4,0,0]} />
-                <Bar dataKey="yellow" fill="#facc15" stackId="zones" radius={[4,4,0,0]} />
-                <Bar dataKey="red" fill="#ef4444" stackId="zones" radius={[4,4,0,0]} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -826,6 +538,67 @@ const TeacherReports = () => {
         </Card>
       </div>
 
+      {/* Zone Distribution Across Periods */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Zone Distribution Across Periods</CardTitle>
+          <CardDescription>Green, Yellow, Red over P1–P3</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer
+            config={{
+              green: { label: 'Green', color: '#16a34a' },
+              yellow: { label: 'Yellow', color: '#facc15' },
+              red: { label: 'Red', color: '#dc2626' },
+            }}
+          >
+            <LineChart data={zonePeriodsLineData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="period" />
+              <YAxis allowDecimals={false} />
+              <ChartTooltip content={<ChartTooltipContent indicator="line" />} />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Line
+                type="monotone"
+                dataKey="green"
+                name="Green"
+                stroke="var(--color-green)"
+                strokeWidth={activeZoneHover === 'green' ? 3 : 2}
+                strokeOpacity={activeZoneHover && activeZoneHover !== 'green' ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveZoneHover('green')}
+                onMouseOut={() => setActiveZoneHover(null)}
+              />
+              <Line
+                type="monotone"
+                dataKey="yellow"
+                name="Yellow"
+                stroke="var(--color-yellow)"
+                strokeWidth={activeZoneHover === 'yellow' ? 3 : 2}
+                strokeOpacity={activeZoneHover && activeZoneHover !== 'yellow' ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveZoneHover('yellow')}
+                onMouseOut={() => setActiveZoneHover(null)}
+              />
+              <Line
+                type="monotone"
+                dataKey="red"
+                name="Red"
+                stroke="var(--color-red)"
+                strokeWidth={activeZoneHover === 'red' ? 3 : 2}
+                strokeOpacity={activeZoneHover && activeZoneHover !== 'red' ? 0.35 : 1}
+                dot={{ r: 3 }}
+                activeDot={{ r: 6 }}
+                onMouseOver={() => setActiveZoneHover('red')}
+                onMouseOut={() => setActiveZoneHover(null)}
+              />
+            </LineChart>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+
       {/* Existing content below remains unchanged */}
       {/* ... existing code ... */}
     </div>
@@ -833,3 +606,5 @@ const TeacherReports = () => {
 };
 
 export default TeacherReports;
+{/* Existing content below remains unchanged */}
+{/* ... existing code ... */}

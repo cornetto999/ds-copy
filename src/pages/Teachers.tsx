@@ -537,20 +537,11 @@ const Teachers = () => {
   };
 
   const downloadTemplate = () => {
-    let csvContent = "FacultyNo,FacultyName,EnrolledStudents,P1_Failed,P1_Percent,P1_Category,P2_Failed,P2_Percent,P2_Category";
-    let sampleData = "14-007-F,ADORMIE CORRALES MACARIO,184,18,9.78,GREEN (0.01%-10%),,,\n" +
-    "24-219-F,ALEXIS VIADOR LAROSA,307,9,2.93,GREEN (0.01%-10%),,,\n" +
-    "24-077-F,AMBER ANN ACAYLAR,201,16,7.96,GREEN (0.01%-10%),,,";
-    
-    // Add P3 only for 2nd semester
+    let header = "FacultyNo,FacultyName,EnrolledStudents,P1_Failed,P1_Percent,P1_Category,P2_Failed,P2_Percent,P2_Category";
     if (semester === "2nd") {
-      csvContent += ",P3_Failed,P3_Percent,P3_Category";
-      sampleData = sampleData.replace(/,,,/g, ",,,");
+      header += ",P3_Failed,P3_Percent,P3_Category";
     }
-    
-    csvContent += "\n" + sampleData;
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const blob = new Blob([header + "\n"], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

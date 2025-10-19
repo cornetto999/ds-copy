@@ -146,8 +146,8 @@ class Subject {
                 'semester' => $row['semester'],
                 'program_id' => (int)$row['program_id'],
                 'program_name' => $row['program_name'],
-                'enrolled_students' => rand(20, 50), // Mock data
-                'passing_students' => rand(15, 45), // Mock data
+                'enrolled_students' => 0,
+                'passing_students' => 0,
                 'cutoff_grade' => (float)$row['cutoff_grade'],
                 'zone' => 'green', // Will be calculated based on pass rate
                 'created_at' => $row['created_at']
